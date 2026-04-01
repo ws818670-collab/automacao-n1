@@ -1,7 +1,10 @@
 import logging
 from contextvars import ContextVar
 
-from pythonjsonlogger.json import JsonFormatter
+try:
+    from pythonjsonlogger.json import JsonFormatter
+except ImportError:  # Compatibility fallback for older package layouts
+    from pythonjsonlogger.jsonlogger import JsonFormatter
 
 correlation_id_var: ContextVar[str | None] = ContextVar("correlation_id", default=None)
 
