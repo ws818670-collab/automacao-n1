@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 from datetime import datetime
 from typing import Any
 
@@ -185,13 +186,121 @@ class JiraClient:
             return None
 
         url = f"{self.base_url}/rest/api/3/issue/{key}"
-        params = {"fields": "*navigable"}
+        params = {"fields": "*navigable", "expand": "names"}
         with httpx.Client(timeout=settings.external_timeout_seconds) as client:
             try:
                 response = self._request_with_retry(client, "GET", url, params=params)
             except JiraIssueNotFoundError:
                 return None
             return response.json()
+
+    def get_issue_property_keys(self, key: str) -> list[str]:
+        if not self.is_configured():
+            logger.warning("Jira client nao configurado; sem leitura de propriedades da issue.")
+            return []
+
+        url = f"{self.base_url}/rest/api/3/issue/{key}/properties"
+        with httpx.Client(timeout=settings.external_timeout_seconds) as client:
+            try:
+                response = self._request_with_retry(client, "GET", url)
+            except JiraIssueNotFoundError:
+                return []
+            data = response.json()
+            keys = data.get("keys", [])
+            return [str(item.get("key", "")).strip() for item in keys if item.get("key")]
+
+    def get_issue_property(self, key: str, property_key: str) -> dict[str, Any] | None:
+        if not self.is_configured():
+            logger.warning("Jira client nao configurado; sem leitura de propriedade da issue.")
+            return None
+
+        url = f"{self.base_url}/rest/api/3/issue/{key}/properties/{property_key}"
+        with httpx.Client(timeout=settings.external_timeout_seconds) as client:
+            try:
+                response = self._request_with_retry(client, "GET", url)
+            except JiraIssueNotFoundError:
+                return None
+            return response.json()
+
+    def extract_request_id(self, issue: dict[str, Any]) -> str | None:
+        fields = issue.get("fields", {})
+        request_field = fields.get("customfield_10010")
+        if isinstance(request_field, dict):
+            links = request_field.get("_links", {})
+            for link_key in ("self", "jiraRest", "web"):
+                link = links.get(link_key, "")
+                if isinstance(link, str):
+                    candidate = link.rstrip("/").split("/")[-1]
+                    if candidate.isdigit():
+                        return candidate
+
+        for value in fields.values():
+            if not isinstance(value, dict):
+                continue
+            links = value.get("_links", {})
+            if not isinstance(links, dict):
+                continue
+            for link_key in ("self", "jiraRest", "web"):
+                link = links.get(link_key, "")
+                if isinstance(link, str) and "/request/" in link:
+                    candidate = link.rstrip("/").split("/")[-1]
+                    if candidate.isdigit():
+                        return candidate
+        return None
+
+    def extract_reporter_first_name(self, issue: dict[str, Any]) -> str:
+        fields = issue.get("fields", {})
+        reporter = fields.get("reporter") or {}
+        display_name = reporter.get("displayName", "") if isinstance(reporter, dict) else ""
+        first_name = display_name.strip().split()[0] if display_name else "Equipe"
+        return first_name or "Equipe"
+
+    def post_public_comment(self, request_id: str, body: str) -> None:
+        if not self.is_configured():
+            raise JiraClientError("Jira client nao configurado")
+        if not request_id.strip():
+            raise JiraClientError("Request ID do Service Desk nao encontrado")
+
+        url = f"{self.base_url}/rest/servicedeskapi/request/{request_id}/comment"
+        payload = {"body": body, "public": True}
+        with httpx.Client(timeout=settings.external_timeout_seconds) as client:
+            self._request_with_retry(client, "POST", url, json=payload)
+
+    def transition_issue(self, issue_key: str, transition_name: str) -> bool:
+        if not self.is_configured():
+            raise JiraClientError("Jira client nao configurado")
+
+        current_issue = self.get_issue(issue_key)
+        current_status = ((current_issue or {}).get("fields", {}).get("status", {}) or {}).get("name", "")
+        if _normalize_label(current_status) == _normalize_label(transition_name):
+            return False
+
+        url = f"{self.base_url}/rest/api/3/issue/{issue_key}/transitions"
+        with httpx.Client(timeout=settings.external_timeout_seconds) as client:
+            transitions_response = self._request_with_retry(client, "GET", url)
+            transitions = transitions_response.json().get("transitions", [])
+            transition_id = next(
+                (
+                    item.get("id")
+                    for item in transitions
+                    if _normalize_label((item.get("to") or {}).get("name", "")) == _normalize_label(transition_name)
+                ),
+                None,
+            )
+            if not transition_id:
+                raise JiraClientError(f"Transicao Jira nao encontrada: {transition_name}")
+            self._request_with_retry(client, "POST", url, json={"transition": {"id": transition_id}})
+        return True
+
+    def assign_issue(self, issue_key: str, account_id: str) -> None:
+        if not self.is_configured():
+            raise JiraClientError("Jira client nao configurado")
+        if not account_id.strip():
+            raise JiraClientError("Account ID do responsavel nao informado")
+
+        url = f"{self.base_url}/rest/api/3/issue/{issue_key}/assignee"
+        with httpx.Client(timeout=settings.external_timeout_seconds) as client:
+            self._request_with_retry(client, "PUT", url, json={"accountId": account_id})
 
     def create_internal_comment(self, issue_key: str, body: str) -> None:
         if not self.is_configured():
@@ -277,6 +386,7 @@ def normalize_issue(issue: dict[str, Any]) -> dict[str, Any]:
         "descricao": _extract_text_from_adf(fields.get("description")),
         "comentarios": "\n".join(comments),
         "produto": _extract_product_field(fields),
+        "tema_chamado": _extract_theme_field(fields),
         "status": fields.get("status", {}).get("name", ""),
         "data_criacao": created,
         "data_fechamento": resolved,
@@ -319,6 +429,18 @@ _KNOWN_PRODUCTS = [
     "taxcentral",
 ]
 
+_THEME_HINT_TERMS = [
+    "tax docs",
+    "taxdocs",
+    "tax compliance",
+    "avatax",
+    "tax central",
+    "relatorio",
+    "integracao",
+    "obrigacao",
+    "captura",
+]
+
 
 def _extract_product_field(fields: dict[str, Any]) -> str:
     """Extrai o nome do produto a partir dos campos do Jira.
@@ -347,6 +469,32 @@ def _extract_product_field(fields: dict[str, Any]) -> str:
     return ""
 
 
+def _extract_theme_field(fields: dict[str, Any]) -> str:
+    """Extrai o tema do chamado a partir dos campos Jira.
+
+    Tenta, em ordem:
+    1. Campo explicitamente configurado via JIRA_THEME_FIELD.
+    2. Heuristica textual em campos customizados.
+    """
+    explicit_field = settings.jira_theme_field.strip()
+    if explicit_field:
+        val = _field_text_value(fields.get(explicit_field))
+        if val:
+            return val
+
+    for key, val in fields.items():
+        if not key.startswith("customfield_"):
+            continue
+        text = _field_text_value(val)
+        if not text:
+            continue
+        text_norm = text.lower()
+        if any(term in text_norm for term in _THEME_HINT_TERMS) and len(text) >= 8:
+            return text
+
+    return ""
+
+
 def _field_text_value(val: Any) -> str:
     """Extrai texto plano de um campo Jira (string, dict com 'value', lista, etc)."""
     if val is None:
@@ -361,3 +509,9 @@ def _field_text_value(val: Any) -> str:
         texts = [_field_text_value(item) for item in val if item]
         return ", ".join(t for t in texts if t)
     return ""
+
+
+def _normalize_label(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    ascii_text = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return " ".join(ascii_text.lower().split())

@@ -13,7 +13,10 @@ def build_jira_analysis_prompt(role_ctx: str, produto: str = "") -> str:
         "- Nao repita o titulo do chamado literalmente no campo cenario.\n"
         "- Considere o produto do chamado ao avaliar os tickets similares: priorize tickets do mesmo produto.\n"
         "- passos_n1 devem ser acoes concretas, verificaveis e alinhadas ao papel do N1 descrito acima.\n"
-        "- Para escalonamento, aplique o criterio de indicacao descrito no papel do N1.\n\n"
+        "- Para escalonamento, aplique o criterio de indicacao descrito no papel do N1.\n"
+        "- Cada ticket similar possui um campo 'confianca' (0.0 a 1.0): use-o para ponderar o peso de cada referencia. "
+        "Tickets com confianca < 0.55 sao referencias fracas; mencione-os com ressalva ou omita-os se contradizerem os demais.\n"
+        "- Tickets similares possuem campo 'data_criacao'. Prefira solucoes de tickets mais recentes quando houver conflito entre abordagens.\n\n"
         "Retorne APENAS JSON valido com estas chaves:\n"
         "- cenario: descricao objetiva do problema em 1-2 frases\n"
         "- causa_provavel: hipotese mais provavel com base no historico (ou 'Nao identificada')\n"
@@ -24,20 +27,4 @@ def build_jira_analysis_prompt(role_ctx: str, produto: str = "") -> str:
         "- passos_n1: lista de exatamente 3 acoes especificas e verificaveis\n"
         "- indicacao: Resolver no N1 | Escalar para N2\n"
         "- confianca: Alta | Media | Baixa"
-    )
-
-
-def build_chat_prompt(role_ctx: str, produto: str = "") -> str:
-    produto_ctx = f"Produto em contexto: {produto}\n" if produto else ""
-    return (
-        f"{role_ctx}\n\n"
-        f"{produto_ctx}"
-        "Com base nos tickets do historico fornecidos, responda a pergunta do atendente N1.\n"
-        "REGRAS: use apenas o contexto fornecido; seja objetivo e tecnico; "
-        "priorize tickets do mesmo produto; "
-        "se a base nao tiver resposta clara, diga explicitamente.\n"
-        "Retorne APENAS JSON valido com as chaves:\n"
-        "- sintese: resumo do que foi identificado (1-2 frases)\n"
-        "- padrao_observado: comportamento recorrente nos tickets similares\n"
-        "- solucao_recorrente: acao que resolveu os casos anteriores (ou 'Sem solucao documentada')"
     )

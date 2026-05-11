@@ -1,10 +1,10 @@
 from datetime import datetime
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.database import Base
+from models.vector_type import VectorType
 from utils.config import get_settings
 
 settings = get_settings()
@@ -31,7 +31,7 @@ class Embedding(Base):
     __tablename__ = "embeddings"
 
     ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"), primary_key=True)
-    embedding_vector: Mapped[list[float]] = mapped_column(Vector(settings.embedding_dimension))
+    embedding_vector: Mapped[list[float]] = mapped_column(VectorType(settings.embedding_dimension))
 
     ticket: Mapped[Ticket] = relationship("Ticket", back_populates="embedding")
 

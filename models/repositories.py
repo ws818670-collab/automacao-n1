@@ -1,6 +1,7 @@
 from datetime import datetime
 
-from sqlalchemy import Select, delete, desc, select
+import numpy as np
+from sqlalchemy import Select, delete, select
 from sqlalchemy.orm import Session, joinedload
 
 from models.entities import Analise, Embedding, Ticket
@@ -91,13 +92,15 @@ def get_ticket_by_key(db: Session, key: str) -> Ticket | None:
 
 
 def get_recent_tickets(db: Session, limit: int = 200) -> list[Ticket]:
+    from sqlalchemy import desc
+
     stmt = (
         select(Ticket)
         .options(joinedload(Ticket.analise), joinedload(Ticket.embedding))
         .order_by(desc(Ticket.data_criacao))
         .limit(limit)
     )
-    return list(db.scalars(stmt).all())
+    return list(db.scalars(stmt).unique().all())
 
 
 def search_similar_tickets(
@@ -107,20 +110,62 @@ def search_similar_tickets(
     exclude_ticket_key: str | None = None,
     allowed_statuses: list[str] | None = None,
 ) -> list[tuple[Ticket, float]]:
-    distance = Embedding.embedding_vector.cosine_distance(vector)
+    """
+    Busca os tickets mais similares usando distância coseno calculada em Python.
+    Funciona com SQLite e PostgreSQL sem extensões de servidor.
+    """
     stmt = (
-        select(Ticket, distance.label("distance"))
+        select(Ticket)
         .join(Embedding, Embedding.ticket_id == Ticket.id)
         .options(joinedload(Ticket.analise))
-        .order_by(distance.asc())
-        .limit(top_k)
     )
     if exclude_ticket_key:
         stmt = stmt.where(Ticket.chave_jira != exclude_ticket_key)
     if allowed_statuses:
         stmt = stmt.where(Ticket.status.in_(allowed_statuses))
-    rows = db.execute(stmt).all()
-    return [(row[0], float(row[1])) for row in rows]
+
+    tickets = list(db.scalars(stmt).unique().all())
+    if not tickets:
+        return []
+
+    ticket_ids = [t.id for t in tickets]
+    emb_rows = db.execute(
+        select(Embedding.ticket_id, Embedding.embedding_vector).where(
+            Embedding.ticket_id.in_(ticket_ids)
+        )
+    ).all()
+    emb_map: dict[int, list[float]] = {
+        row.ticket_id: row.embedding_vector
+        for row in emb_rows
+        if row.embedding_vector is not None
+    }
+
+    query_vec = np.array(vector, dtype=np.float32)
+    query_norm = float(np.linalg.norm(query_vec))
+
+    scored: list[tuple[Ticket, float]] = []
+    for ticket in tickets:
+        emb_vector = emb_map.get(ticket.id)
+        if emb_vector is None:
+            continue
+        distance = _cosine_distance(query_vec, query_norm, emb_vector)
+        scored.append((ticket, distance))
+
+    scored.sort(key=lambda pair: pair[1])
+    return scored[:top_k]
+
+
+def _cosine_distance(
+    query_vec: np.ndarray,
+    query_norm: float,
+    candidate: list[float],
+) -> float:
+    cand_vec = np.array(candidate, dtype=np.float32)
+    cand_norm = float(np.linalg.norm(cand_vec))
+    if query_norm == 0.0 or cand_norm == 0.0:
+        return 1.0
+    similarity = float(np.dot(query_vec, cand_vec)) / (query_norm * cand_norm)
+    return float(1.0 - similarity)
 
 
 def sync_ticket_scope(db: Session, allowed_keys: set[str]) -> None:

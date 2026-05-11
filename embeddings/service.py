@@ -7,7 +7,6 @@ from time import perf_counter
 import numpy as np
 
 from openai import OpenAI
-from sentence_transformers import SentenceTransformer
 
 from exceptions import ConfigurationError, EmbeddingError
 from utils.retry import external_retry
@@ -22,7 +21,11 @@ class EmbeddingService:
         provider = self._get_provider()
         self._use_local = provider == "local"
         self._client = OpenAI(api_key=settings.openai_api_key_value()) if not self._use_local else None
-        self._local_model = SentenceTransformer(settings.local_embedding_model) if self._use_local else None
+        if self._use_local:
+            from sentence_transformers import SentenceTransformer
+            self._local_model = SentenceTransformer(settings.local_embedding_model)
+        else:
+            self._local_model = None
 
     def embed(self, text: str) -> list[float]:
         if not text.strip():
@@ -48,9 +51,10 @@ class EmbeddingService:
         return vector
 
     def _get_provider(self) -> str:
-        if settings.embedding_provider == "openai" and not settings.openai_api_key_value():
+        current = get_settings()
+        if current.embedding_provider == "openai" and not current.openai_api_key_value():
             raise ConfigurationError("OPENAI_API_KEY obrigatoria quando EMBEDDING_PROVIDER=openai")
-        return settings.embedding_provider
+        return current.embedding_provider
 
     @external_retry()
     def _openai_embed(self, text: str) -> list[float]:
@@ -64,7 +68,7 @@ class EmbeddingService:
         if self._local_model is None:
             return self._fallback_embed(text)
 
-        vector = self._local_model.encode(text, normalize_embeddings=True)
+        vector = self._local_model.encode(text, normalize_embeddings=True, show_progress_bar=False)
         adapted = _adapt_vector_dimension(np.asarray(vector, dtype=np.float32), settings.embedding_dimension)
         return adapted.tolist()
 

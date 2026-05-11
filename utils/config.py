@@ -1,21 +1,28 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 from typing_extensions import Annotated
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+# Caminho fixo: nao depender do CWD (Task Scheduler, NSSM, etc. comecam em System32).
+_PROJECT_DIR = Path(__file__).resolve().parent.parent
+_ENV_FILE_PATH = _PROJECT_DIR / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(str(_ENV_FILE_PATH),),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
-    app_name: str = Field(default="knowledge-intelligence-jira", alias="APP_NAME")
-    app_version: str = Field(default="1.0.0", alias="APP_VERSION")
     app_env: str = Field(default="dev", alias="APP_ENV")
-    app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
-    app_port: int = Field(default=8000, alias="APP_PORT")
+    auto_init_db: bool = Field(default=True, alias="AUTO_INIT_DB")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
-    log_format: Literal["json", "text"] = Field(default="json", alias="LOG_FORMAT")
+    # Worker SQS: padrao `text` (legivel). `json` = uma linha JSON por evento.
+    worker_log_format: Literal["json", "text"] = Field(default="text", alias="WORKER_LOG_FORMAT")
 
     database_url: str = Field(alias="DATABASE_URL")
     db_pool_size: int = Field(default=5, alias="DB_POOL_SIZE")
@@ -34,6 +41,37 @@ class Settings(BaseSettings):
     # ID do campo customizado "produto" no Jira (ex: customfield_10200).
     # Deixe vazio para deteccao automatica por varredura de campos.
     jira_product_field: str = Field(default="", alias="JIRA_PRODUCT_FIELD")
+    # ID do campo customizado "tema do chamado" no Jira (ex: customfield_10201).
+    # Deixe vazio para deteccao automatica por heuristica textual.
+    jira_theme_field: str = Field(default="", alias="JIRA_THEME_FIELD")
+    jira_default_assignee_id: str = Field(default="", alias="JIRA_DEFAULT_ASSIGNEE_ID")
+    jira_triage_transition_name: str = Field(default="Analise JDMS", alias="JIRA_TRIAGE_TRANSITION_NAME")
+
+    email_imap_host: str = Field(default="", alias="EMAIL_IMAP_HOST")
+    email_imap_port: int = Field(default=993, alias="EMAIL_IMAP_PORT")
+    email_imap_username: str = Field(default="", alias="EMAIL_IMAP_USERNAME")
+    email_imap_password: SecretStr | None = Field(default=None, alias="EMAIL_IMAP_PASSWORD")
+    email_imap_folder: str = Field(default="INBOX", alias="EMAIL_IMAP_FOLDER")
+    email_allowed_senders: Annotated[list[str], NoDecode] = Field(default_factory=list, alias="EMAIL_ALLOWED_SENDERS")
+    email_poll_interval_seconds: int = Field(default=30, alias="EMAIL_POLL_INTERVAL_SECONDS")
+    email_max_messages_per_poll: int = Field(default=20, alias="EMAIL_MAX_MESSAGES_PER_POLL")
+    email_mark_as_seen: bool = Field(default=True, alias="EMAIL_MARK_AS_SEEN")
+    email_triage_transition_name: str = Field(default="Analise JDMS", alias="EMAIL_TRIAGE_TRANSITION_NAME")
+
+    # Microsoft Graph API (substitui IMAP — Auth Delegada via Device Code Flow)
+    graph_tenant_id: str = Field(default="", alias="GRAPH_TENANT_ID")
+    graph_client_id: str = Field(default="", alias="GRAPH_CLIENT_ID")
+    graph_mailbox: str = Field(default="", alias="GRAPH_MAILBOX")
+    graph_refresh_token: str = Field(default="", alias="GRAPH_REFRESH_TOKEN")
+
+    sqs_queue_url: str = Field(default="", alias="SQS_QUEUE_URL")
+    sqs_region: str = Field(default="us-east-1", alias="SQS_REGION")
+    sqs_wait_time_seconds: int = Field(default=20, alias="SQS_WAIT_TIME_SECONDS")
+    sqs_max_messages: int = Field(default=1, alias="SQS_MAX_MESSAGES")
+    sqs_visibility_timeout: int = Field(default=300, alias="SQS_VISIBILITY_TIMEOUT")
+    # Opcional: mesmas chaves que apps .NET costumam usar. Se vazias, boto3 usa IAM Role da instancia ou ~/.aws.
+    aws_access_key_id: SecretStr | None = Field(default=None, alias="AWS_ACCESS_KEY_ID")
+    aws_secret_access_key: SecretStr | None = Field(default=None, alias="AWS_SECRET_ACCESS_KEY")
 
     llm_provider: Literal["gemini", "openai", "auto"] = Field(default="auto", alias="LLM_PROVIDER")
     openai_api_key: SecretStr | None = Field(default=None, alias="OPENAI_API_KEY")
@@ -91,6 +129,19 @@ class Settings(BaseSettings):
             return [item.strip().strip('"\'') for item in text.split(",") if item.strip().strip('"\'')]
         return [item.strip() for item in text.split("|") if item.strip()]
 
+    @field_validator("email_allowed_senders", mode="before")
+    @classmethod
+    def _parse_email_senders(cls, value: object) -> list[str]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, list):
+            return [str(item).strip().lower() for item in value if str(item).strip()]
+        text = str(value).strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+            return [item.strip().strip('"\'').lower() for item in text.split(",") if item.strip().strip('"\'')]
+        return [item.strip().lower() for item in text.split("|") if item.strip()]
+
     @model_validator(mode="after")
     def _validate_provider_configuration(self) -> "Settings":
         has_openai = bool(self.openai_api_key and self.openai_api_key.get_secret_value().strip())
@@ -123,6 +174,9 @@ class Settings(BaseSettings):
 
     def jira_api_token_value(self) -> str:
         return self.jira_api_token.get_secret_value()
+
+    def email_imap_password_value(self) -> str:
+        return self.email_imap_password.get_secret_value() if self.email_imap_password else ""
 
     def openai_api_key_value(self) -> str:
         return self.openai_api_key.get_secret_value() if self.openai_api_key else ""

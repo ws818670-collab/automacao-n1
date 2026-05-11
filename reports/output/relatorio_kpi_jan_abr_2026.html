@@ -1,0 +1,713 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Relatório KPI Suporte N1 — 2026 · JDMS Consulting</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --navy:   #0D2137;
+  --blue:   #1A56A0;
+  --blue2:  #2E75B6;
+  --sky:    #5BA4CF;
+  --green:  #059669;
+  --orange: #D97706;
+  --red:    #DC2626;
+  --purple: #7C3AED;
+  --teal:   #0891B2;
+  --bg:     #F1F5F9;
+  --card:   #FFFFFF;
+  --border: #E2E8F0;
+  --text:   #1E293B;
+  --muted:  #64748B;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── HEADER ── */
+.header {
+  background: var(--navy);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 40px;
+  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 12px rgba(0,0,0,.3);
+}
+.header-logo { font-size: 15px; font-weight: 700; letter-spacing: .5px; }
+.header-logo span { color: var(--sky); }
+.header-meta { font-size: 11px; color: rgba(255,255,255,.55); }
+
+/* ── HERO ── */
+.hero {
+  background: linear-gradient(120deg, var(--navy) 0%, var(--blue) 55%, var(--blue2) 100%);
+  color: #fff;
+  padding: 48px 40px 40px;
+  position: relative;
+  overflow: hidden;
+}
+.hero::after {
+  content: '';
+  position: absolute;
+  right: -80px; top: -80px;
+  width: 380px; height: 380px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.04);
+}
+.hero-tag {
+  display: inline-block;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 20px;
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+.hero h1 { font-size: 28px; font-weight: 700; line-height: 1.2; }
+.hero p  { font-size: 13px; color: rgba(255,255,255,.65); margin-top: 8px; }
+.hero-date { font-size: 11px; color: rgba(255,255,255,.45); margin-top: 16px; }
+
+/* ── LAYOUT ── */
+.page { max-width: 1280px; margin: 0 auto; padding: 32px 40px 48px; }
+
+/* ── SECTION HEADER ── */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  margin-top: 40px;
+}
+.section-header h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--navy);
+}
+.section-header::before {
+  content: '';
+  display: block;
+  width: 4px; height: 20px;
+  background: var(--blue2);
+  border-radius: 2px;
+}
+.section-tag {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--muted);
+  background: var(--border);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* ── KPI CARDS ── */
+.kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.kpi-row.wide { grid-template-columns: repeat(6, 1fr); }
+
+.kcard {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 22px 18px 18px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.05);
+  border-top: 3px solid var(--blue2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: box-shadow .2s;
+}
+.kcard:hover { box-shadow: 0 4px 24px rgba(0,0,0,.12); }
+.kcard.c-blue   { border-top-color: var(--blue2); }
+.kcard.c-orange { border-top-color: var(--orange); }
+.kcard.c-green  { border-top-color: var(--green); }
+.kcard.c-purple { border-top-color: var(--purple); }
+.kcard.c-teal   { border-top-color: var(--teal); }
+.kcard.c-red    { border-top-color: var(--red); }
+
+.kcard-icon { font-size: 20px; margin-bottom: 6px; }
+.kcard-value {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--navy);
+}
+.kcard.c-orange .kcard-value { color: var(--orange); }
+.kcard.c-green  .kcard-value { color: var(--green);  }
+.kcard.c-purple .kcard-value { color: var(--purple); }
+.kcard.c-teal   .kcard-value { color: var(--teal);   }
+.kcard.c-red    .kcard-value { color: var(--red);    }
+.kcard-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 6px;
+}
+.kcard-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.kcard-badge {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #EFF6FF;
+  color: var(--blue2);
+}
+.kcard.c-orange .kcard-badge { background:#FFF7ED; color:var(--orange); }
+.kcard.c-green  .kcard-badge { background:#ECFDF5; color:var(--green);  }
+.kcard.c-purple .kcard-badge { background:#F5F3FF; color:var(--purple); }
+.kcard.c-teal   .kcard-badge { background:#ECFEFF; color:var(--teal);   }
+.kcard.c-red    .kcard-badge { background:#FEF2F2; color:var(--red);    }
+
+/* ── MONTH BAND ── */
+.month-band {
+  display: grid;
+  grid-template-columns: repeat(4,1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+.mcard {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.mcard-circle {
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  background: #EFF6FF;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 700; color: var(--blue2);
+  flex-shrink: 0;
+}
+.mcard-info { flex: 1; }
+.mcard-name { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+.mcard-val  { font-size: 24px; font-weight: 700; color: var(--navy); }
+.mcard-sub  { font-size: 10px; color: var(--muted); }
+
+/* ── CHART GRID ── */
+.chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.ccart {
+  background: var(--card);
+  border-radius: 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.05);
+  padding: 22px 20px 18px;
+}
+.ccart.full { grid-column: span 2; }
+.ccart-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+canvas { max-height: 280px; }
+
+/* ── TABLES ── */
+.table-wrap { overflow-x: auto; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: var(--card);
+}
+thead { background: var(--navy); color: #fff; }
+th {
+  padding: 11px 16px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+td { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+tr:nth-child(even) td { background: #F8FAFC; }
+tr:hover td { background: #EFF6FF; transition: background .15s; }
+.td-num  { font-weight: 600; color: var(--blue2); }
+.td-high { font-weight: 700; color: var(--orange); }
+
+/* ── DIVIDER ── */
+.divider { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+/* ── FOOTER ── */
+.footer {
+  background: var(--navy);
+  color: rgba(255,255,255,.5);
+  text-align: center;
+  padding: 18px 40px;
+  font-size: 11px;
+  margin-top: 40px;
+}
+.footer strong { color: rgba(255,255,255,.8); }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-logo">JDMS <span>Consulting</span></div>
+  <div class="header-meta">Relatório Suporte N1 · Gerado em 28/04/2026 18:00</div>
+</header>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-tag">Relatório Executivo</div>
+  <h1>Performance de Suporte N1</h1>
+  <p>Janeiro a Abril de 2026 · Projeto JDMSN1 · JDMS Consulting</p>
+  <div class="hero-date">Período: 01/01/2026 – 28/04/2026 · Total analisado: 295 chamados</div>
+</div>
+
+<div class="page">
+
+  <!-- ── KPIs PRINCIPAIS ── -->
+  <div class="section-header">
+    <h2>Indicadores Gerais</h2>
+    <span class="section-tag">Jan – Abr 2026</span>
+  </div>
+
+  <div class="kpi-row wide">
+    <div class="kcard c-blue">
+      <div class="kcard-icon">📋</div>
+      <div class="kcard-value">295</div>
+      <div class="kcard-label">Total de Chamados</div>
+      <div class="kcard-sub">Jan – Abr 2026</div>
+    </div>
+    <div class="kcard c-green">
+      <div class="kcard-icon">✅</div>
+      <div class="kcard-value">263</div>
+      <div class="kcard-label">Chamados Resolvidos</div>
+      <div class="kcard-sub">Taxa de resolução</div>
+      <span class="kcard-badge">89.2%</span>
+    </div>
+    <div class="kcard c-orange">
+      <div class="kcard-icon">🔗</div>
+      <div class="kcard-value">140</div>
+      <div class="kcard-label">Escalados à Avalara</div>
+      <div class="kcard-sub">do total de chamados</div>
+      <span class="kcard-badge">47.5%</span>
+    </div>
+    <div class="kcard c-red">
+      <div class="kcard-icon">⚙️</div>
+      <div class="kcard-value">66</div>
+      <div class="kcard-label">Para Engenharia</div>
+      <div class="kcard-sub">22.4% do total</div>
+      <span class="kcard-badge">47.1% dos Avalara</span>
+    </div>
+    <div class="kcard c-teal">
+      <div class="kcard-icon">⏱️</div>
+      <div class="kcard-value">6.1 dias</div>
+      <div class="kcard-label">Tempo Médio sem Avalara</div>
+      <div class="kcard-sub">Chamados resolvidos internamente</div>
+    </div>
+    <div class="kcard c-purple">
+      <div class="kcard-icon">⏳</div>
+      <div class="kcard-value">18.6 dias</div>
+      <div class="kcard-label">Tempo Médio com Avalara</div>
+      <div class="kcard-sub">Chamados com suporte Avalara</div>
+    </div>
+  </div>
+
+  <!-- ── CHAMADOS POR MÊS ── -->
+  <div class="section-header" style="margin-top:32px;">
+    <h2>Distribuição Mensal</h2>
+  </div>
+  <div class="month-band">
+    
+    <div class="mcard">
+      <div class="mcard-circle">74</div>
+      <div class="mcard-info">
+        <div class="mcard-name">Janeiro</div>
+        <div class="mcard-val">74</div>
+        <div class="mcard-sub">Avalara: 38 · Eng: 17</div>
+      </div>
+    </div>
+    
+    <div class="mcard">
+      <div class="mcard-circle">74</div>
+      <div class="mcard-info">
+        <div class="mcard-name">Fevereiro</div>
+        <div class="mcard-val">74</div>
+        <div class="mcard-sub">Avalara: 33 · Eng: 20</div>
+      </div>
+    </div>
+    
+    <div class="mcard">
+      <div class="mcard-circle">70</div>
+      <div class="mcard-info">
+        <div class="mcard-name">Março</div>
+        <div class="mcard-val">70</div>
+        <div class="mcard-sub">Avalara: 26 · Eng: 13</div>
+      </div>
+    </div>
+    
+    <div class="mcard">
+      <div class="mcard-circle">77</div>
+      <div class="mcard-info">
+        <div class="mcard-name">Abril</div>
+        <div class="mcard-val">77</div>
+        <div class="mcard-sub">Avalara: 43 · Eng: 16</div>
+      </div>
+    </div>
+    
+  </div>
+
+  <!-- ── GRÁFICOS ── -->
+  <div class="section-header">
+    <h2>Análise Visual</h2>
+  </div>
+  <div class="chart-grid">
+
+    <div class="ccart full">
+      <div class="ccart-title">Comparativo Mensal — Abertos vs Escalados Avalara vs Encaminhados Engenharia</div>
+      <canvas id="cAvalara"></canvas>
+    </div>
+
+    <div class="ccart">
+      <div class="ccart-title">Chamados por Mês</div>
+      <canvas id="cMes"></canvas>
+    </div>
+
+    <div class="ccart">
+      <div class="ccart-title">Distribuição por Status</div>
+      <canvas id="cStatus"></canvas>
+    </div>
+
+    <div class="ccart full">
+      <div class="ccart-title">Top 10 Clientes com Maior Volume de Chamados</div>
+      <canvas id="cClientes"></canvas>
+    </div>
+
+    <div class="ccart full">
+      <div class="ccart-title">Chamados por Produto / Solução</div>
+      <canvas id="cProduto"></canvas>
+    </div>
+
+  </div>
+
+  <!-- ── TABELA COMPARATIVO ── -->
+  <div class="section-header">
+    <h2>Comparativo Mensal Detalhado</h2>
+    <span class="section-tag">Abertos · Avalara · Engenharia</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Mês</th>
+          <th>Chamados Abertos</th>
+          <th>Com Chamado Avalara</th>
+          <th>% Avalara</th>
+          <th>Para Engenharia</th>
+          <th>% Avalara → Eng.</th>
+          <th>% Abertos → Eng.</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td><strong>Janeiro</strong></td>
+          <td class="td-num">74</td>
+          <td class="td-num">38</td>
+          <td>51.4%</td>
+          <td class="td-high">17</td>
+          <td>44.7%</td>
+          <td>23.0%</td>
+        </tr>
+        
+        <tr>
+          <td><strong>Fevereiro</strong></td>
+          <td class="td-num">74</td>
+          <td class="td-num">33</td>
+          <td>44.6%</td>
+          <td class="td-high">20</td>
+          <td>60.6%</td>
+          <td>27.0%</td>
+        </tr>
+        
+        <tr>
+          <td><strong>Março</strong></td>
+          <td class="td-num">70</td>
+          <td class="td-num">26</td>
+          <td>37.1%</td>
+          <td class="td-high">13</td>
+          <td>50.0%</td>
+          <td>18.6%</td>
+        </tr>
+        
+        <tr>
+          <td><strong>Abril</strong></td>
+          <td class="td-num">77</td>
+          <td class="td-num">43</td>
+          <td>55.8%</td>
+          <td class="td-high">16</td>
+          <td>37.2%</td>
+          <td>20.8%</td>
+        </tr>
+        
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── TABELA CLIENTES ── -->
+  <div class="section-header">
+    <h2>Clientes com Maior Volume</h2>
+    <span class="section-tag">Top 15</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Cliente</th>
+          <th>Chamados</th>
+          <th>Escalados à Avalara</th>
+          <th>% Escalados</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">1</td>
+          <td><strong>DAKI - FF TECH</strong></td>
+          <td class="td-num">41</td>
+          <td class="td-num">27</td>
+          <td>65.9%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">2</td>
+          <td><strong>PROMOB</strong></td>
+          <td class="td-num">40</td>
+          <td class="td-num">27</td>
+          <td>67.5%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">3</td>
+          <td><strong>NUSSED</strong></td>
+          <td class="td-num">31</td>
+          <td class="td-num">11</td>
+          <td>35.5%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">4</td>
+          <td><strong>STINE</strong></td>
+          <td class="td-num">30</td>
+          <td class="td-num">17</td>
+          <td>56.7%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">5</td>
+          <td><strong>RAYNER</strong></td>
+          <td class="td-num">27</td>
+          <td class="td-num">10</td>
+          <td>37.0%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">6</td>
+          <td><strong>PETRO</strong></td>
+          <td class="td-num">24</td>
+          <td class="td-num">1</td>
+          <td>4.2%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">7</td>
+          <td><strong>NILIT</strong></td>
+          <td class="td-num">23</td>
+          <td class="td-num">12</td>
+          <td>52.2%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">8</td>
+          <td><strong>NUFARM</strong></td>
+          <td class="td-num">21</td>
+          <td class="td-num">6</td>
+          <td>28.6%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">9</td>
+          <td><strong>ALTA-BRASIL</strong></td>
+          <td class="td-num">11</td>
+          <td class="td-num">6</td>
+          <td>54.5%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">10</td>
+          <td><strong>KAVAK</strong></td>
+          <td class="td-num">10</td>
+          <td class="td-num">5</td>
+          <td>50.0%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">11</td>
+          <td><strong>TOO SEGUROS</strong></td>
+          <td class="td-num">9</td>
+          <td class="td-num">3</td>
+          <td>33.3%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">12</td>
+          <td><strong>NTS</strong></td>
+          <td class="td-num">9</td>
+          <td class="td-num">7</td>
+          <td>77.8%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">13</td>
+          <td><strong>MILLIKEN</strong></td>
+          <td class="td-num">4</td>
+          <td class="td-num">4</td>
+          <td>100.0%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">14</td>
+          <td><strong>Everton Giehl</strong></td>
+          <td class="td-num">3</td>
+          <td class="td-num">0</td>
+          <td>0.0%</td>
+        </tr>
+        
+        <tr>
+          <td style="color:var(--muted);font-weight:600">15</td>
+          <td><strong>HT MICRON</strong></td>
+          <td class="td-num">2</td>
+          <td class="td-num">1</td>
+          <td>50.0%</td>
+        </tr>
+        
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- /page -->
+
+<footer class="footer">
+  <strong>JDMS Consulting</strong> · Suporte N1 · Relatório gerado automaticamente em 28/04/2026 18:00 · Dados extraídos do Jira JDMSN1
+</footer>
+
+<script>
+const P = ["#1F4E79", "#2E75B6", "#5BA4CF", "#9DC3E6", "#ED7D31", "#FFC000", "#70AD47", "#7030A0", "#FF0000", "#00B0F0", "#92D050", "#FF7C80"];
+const G = {"meses_labels": ["Janeiro", "Fevereiro", "Março", "Abril"], "por_mes": [74, 74, 70, 77], "avalara_mes": [38, 33, 26, 43], "engenharia_mes": [17, 20, 13, 16], "status_labels": ["Concluído", "Aguardando retorno - Avalara", "Aguardando Retorno – Cliente", "Analise JDMS"], "status_vals": [263, 15, 12, 5], "clientes_labels": ["DAKI - FF TECH", "PROMOB", "NUSSED", "STINE", "RAYNER", "PETRO", "NILIT", "NUFARM", "ALTA-BRASIL", "KAVAK"], "clientes_vals": [41, 40, 31, 30, 27, 24, 23, 21, 11, 10], "prod_labels": ["Avatax BR", "Tax Compliance", "Bundle NS", "Portal Avalara", "Tax Docs Monitor", "Não informado", "AvaTax BR"], "prod_vals": [90, 61, 40, 30, 28, 24, 22], "palette": ["#1F4E79", "#2E75B6", "#5BA4CF", "#9DC3E6", "#ED7D31", "#FFC000", "#70AD47", "#7030A0", "#FF0000", "#00B0F0", "#92D050", "#FF7C80"]};
+
+const chartDefaults = {
+  plugins: { legend: { labels: { font: { family: 'Inter', size: 11 }, usePointStyle: true } } },
+  scales: {
+    x: { grid: { color: '#F1F5F9' }, ticks: { font: { family: 'Inter', size: 11 } } },
+    y: { grid: { color: '#F1F5F9' }, ticks: { font: { family: 'Inter', size: 11 } } }
+  }
+};
+
+// Comparativo mensal (grouped bar – destaque principal)
+new Chart(document.getElementById('cAvalara'), {
+  type: 'bar',
+  data: {
+    labels: G.meses_labels,
+    datasets: [
+      { label: 'Chamados Abertos',         data: G.por_mes,          backgroundColor: '#2E75B6', borderRadius: 5 },
+      { label: 'Escalados à Avalara',      data: G.avalara_mes,       backgroundColor: '#D97706', borderRadius: 5 },
+      { label: 'Encaminhados Engenharia',  data: G.engenharia_mes,    backgroundColor: '#DC2626', borderRadius: 5 }
+    ]
+  },
+  options: {
+    ...chartDefaults,
+    plugins: { ...chartDefaults.plugins, legend: { ...chartDefaults.plugins.legend, position: 'top' } },
+    scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, beginAtZero: true } }
+  }
+});
+
+// Chamados por mês (bar simples)
+new Chart(document.getElementById('cMes'), {
+  type: 'bar',
+  data: {
+    labels: G.meses_labels,
+    datasets: [{ label: 'Chamados', data: G.por_mes, backgroundColor: ['#1A56A0','#2E75B6','#5BA4CF','#9DC3E6'], borderRadius: 6 }]
+  },
+  options: { ...chartDefaults, plugins: { legend: { display: false } } }
+});
+
+// Status (doughnut)
+new Chart(document.getElementById('cStatus'), {
+  type: 'doughnut',
+  data: {
+    labels: G.status_labels,
+    datasets: [{ data: G.status_vals, backgroundColor: P, borderWidth: 2, borderColor: '#fff' }]
+  },
+  options: {
+    plugins: { legend: { position: 'right', labels: { font: { family: 'Inter', size: 11 }, usePointStyle: true, padding: 14 } } },
+    cutout: '60%'
+  }
+});
+
+// Top clientes
+new Chart(document.getElementById('cClientes'), {
+  type: 'bar',
+  data: {
+    labels: G.clientes_labels,
+    datasets: [{ label: 'Chamados', data: G.clientes_vals, backgroundColor: '#1A56A0', borderRadius: 4 }]
+  },
+  options: {
+    indexAxis: 'y',
+    plugins: { legend: { display: false } },
+    scales: { x: { grid: { color: '#F1F5F9' }, ticks: { font: { family: 'Inter', size: 11 } } },
+               y: { grid: { display: false }, ticks: { font: { family: 'Inter', size: 11 } } } }
+  }
+});
+
+// Produtos
+new Chart(document.getElementById('cProduto'), {
+  type: 'bar',
+  data: {
+    labels: G.prod_labels,
+    datasets: [{ label: 'Chamados', data: G.prod_vals, backgroundColor: '#0891B2', borderRadius: 4 }]
+  },
+  options: {
+    indexAxis: 'y',
+    plugins: { legend: { display: false } },
+    scales: { x: { grid: { color: '#F1F5F9' }, ticks: { font: { family: 'Inter', size: 11 } } },
+               y: { grid: { display: false }, ticks: { font: { family: 'Inter', size: 11 } } } }
+  }
+});
+</script>
+</body>
+</html>

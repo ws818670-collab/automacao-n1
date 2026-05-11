@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-from pgvector.sqlalchemy import Vector
 
 revision = "001_initial_schema"
 down_revision = None
@@ -18,7 +17,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        bind.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
 
     op.create_table(
         "tickets",
@@ -38,7 +39,8 @@ def upgrade() -> None:
     op.create_table(
         "embeddings",
         sa.Column("ticket_id", sa.Integer(), nullable=False),
-        sa.Column("embedding_vector", Vector(1536), nullable=False),
+        # Vector stored as JSON text; compatible with SQLite and PostgreSQL.
+        sa.Column("embedding_vector", sa.Text(), nullable=False),
         sa.ForeignKeyConstraint(["ticket_id"], ["tickets.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("ticket_id"),
     )

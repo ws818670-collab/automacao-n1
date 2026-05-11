@@ -4,11 +4,10 @@
 
 Este projeto implementa um backend de Inteligência de Conhecimento para operação N1 com foco em:
 
-- Triagem automática de chamados Jira.
+- Triagem automática de chamados Jira (acionada pelo consumer SQS).
 - Sugestão de comentário interno para atendentes N1.
 - Recuperação de conhecimento por similaridade semântica e sinais léxicos/taxonômicos.
-- Consulta de base histórica por chatbot.
-- Ingestão de histórico por JQL e importação de bases curadas.
+- Ingestão de histórico por JQL (ferramentas em `tools/`) e importação de bases curadas.
 
 Escopo atual: MVP funcional orientado a operação assistida (não resposta automática ao cliente final).
 
@@ -16,47 +15,34 @@ Escopo atual: MVP funcional orientado a operação assistida (não resposta auto
 
 Arquitetura em camadas, com separação por domínio técnico:
 
-- API: expõe endpoints FastAPI e coordena casos de uso.
+- Worker (`worker/sqs_consumer.py`): consome AWS SQS e executa o fluxo Jira (`JiraFlowService`).
 - Ingestion: processa tickets e persiste dados derivados.
 - Processing: consolidação textual, heurísticas de problema/solução, classificação de tema.
 - Embeddings: geração vetorial local/OpenAI e adaptação de dimensão.
 - Retrieval: ranking híbrido (vetorial + léxico + taxonomia + intenção + título + produto).
-- LLM: geração de análise e resposta de chat com fallback heurístico.
+- LLM: geração de comentário de triagem com fallback heurístico (Gemini/OpenAI/auto).
 - Jira: integração REST para leitura de issues e postagem de comentário interno.
-- Models: persistência SQLAlchemy e consultas vetoriais via pgvector.
+- Models: persistência SQLAlchemy; PostgreSQL opcional com extensão `vector` quando aplicável.
 - Tools: scripts operacionais para exportação e importação de bases.
 
 ## 3. Estrutura de Módulos e Responsabilidades
 
 ### 3.1 Inicialização e Configuração
 
-- main.py
-  - Inicializa aplicação FastAPI.
-  - Registra rotas.
-  - Configura logging.
-  - Executa init_db no startup.
+- worker/sqs_consumer.py
+  - Long polling na fila SQS.
+  - Monta serviços (Jira, embeddings, retrieval, LLM, ingestion) e chama `JiraFlowService.process_issue`.
+  - Opcional: `init_db()` quando `AUTO_INIT_DB=true`.
+  - Logging via `utils.logging` (`WORKER_LOG_FORMAT`).
 
 - utils/config.py
   - Define Settings via pydantic-settings.
   - Centraliza variáveis de ambiente e defaults.
 
 - utils/logging.py
-  - Configuração base de logging.
+  - Configuração base de logging e `correlation_id` por mensagem (chave Jira).
 
-### 3.2 API
-
-- api/routes.py
-  - GET /health
-  - POST /jira/webhook
-  - POST /chat/query
-  - GET /jira/analyze-preview
-  - POST /jira/analyze-and-post
-  - POST /jira/ingest
-
-- api/schemas.py
-  - Schemas de request/response com Pydantic.
-
-### 3.3 Persistência
+### 3.2 Persistência
 
 - models/database.py
   - Engine SQLAlchemy.
@@ -76,7 +62,7 @@ Arquitetura em camadas, com separação por domínio técnico:
   - Busca de similares por distância coseno.
   - Sincronização de escopo com remoção de tickets fora da base selecionada.
 
-### 3.4 Ingestão e Processamento
+### 3.3 Ingestão e Processamento
 
 - ingestion/service.py
   - ingest_historical por JQL.
@@ -87,7 +73,7 @@ Arquitetura em camadas, com separação por domínio técnico:
   - extract_problem_solution_context (heurística).
   - classify_ticket_theme e infer_query_theme.
 
-### 3.5 Similaridade e Geração de Conteúdo
+### 3.4 Similaridade e Geração de Conteúdo
 
 - embeddings/service.py
   - Embedding local com sentence-transformers.
@@ -100,11 +86,11 @@ Arquitetura em camadas, com separação por domínio técnico:
   - Filtragem de ruído e priorização taxonômica.
 
 - llm/service.py
-  - Geração de comentário de triagem e resposta de chat.
+  - Geração de comentário de triagem (análise Jira).
   - Suporte a Gemini/OpenAI/auto.
   - Fallback estruturado quando LLM indisponível.
 
-### 3.6 Integração Jira
+### 3.5 Integração Jira
 
 - jira/client.py
   - Busca paginada de issues (estratégia moderna + fallback legado).
@@ -113,7 +99,7 @@ Arquitetura em camadas, com separação por domínio técnico:
   - Normalização de issue para modelo interno.
   - Extração de campo produto configurável ou autodetectado.
 
-### 3.7 Ferramentas Operacionais
+### 3.6 Ferramentas Operacionais
 
 - tools/export_jql_to_csv.py
   - Exporta base Jira para CSV de curadoria.
@@ -162,105 +148,53 @@ Arquitetura em camadas, com separação por domínio técnico:
 
 ## 5. Fluxos Lógicos Principais
 
-### 5.1 Webhook Jira para Triagem
+### 5.1 Mensagem SQS → Fluxo Jira (`JiraFlowService.process_issue`)
 
-1. Recebe payload em POST /jira/webhook.
-2. Consolida texto, extrai problema/solução/contexto.
-3. Classifica tema/subtema.
-4. Upsert ticket + embedding + análise.
-5. Executa retrieval de similares.
-6. Gera comentário de triagem (LLM ou fallback).
-7. Publica comentário interno no Jira (se habilitado).
-8. Commit da transação.
+1. Worker recebe mensagem JSON da fila (mínimo: `chave_jira`).
+2. Busca a issue no Jira; normaliza e ingere (`process_ticket_data`: texto, problema/solução, tema, embedding, análise).
+3. Opcional: comentário público de saudação (Service Desk), transição de workflow, atribuição — conforme flags da mensagem e `.env`.
+4. Se `comentario_interno`: retrieval de similares, geração de nota de triagem (LLM ou fallback), postagem de comentário **interno** no Jira.
+5. Commit (ou rollback em erro); mensagem deletada da fila em sucesso; erros recuperáveis devolvem a mensagem à fila após o visibility timeout.
 
-### 5.2 Consulta de Chat
+### 5.2 Ingestão histórica em lote
 
-1. Recebe pergunta em POST /chat/query.
-2. Gera embedding da pergunta.
-3. Busca similares no retrieval híbrido.
-4. Gera resposta sintetizada por LLM/fallback.
-5. Retorna resposta e tickets relacionados.
+- Realizada por `ingestion/service.py` (JQL) acionada pelos scripts em `tools/`, não pelo worker SQS.
 
-### 5.3 Preview de Análise sem Postagem
+## 6. Contrato da fila (SQS)
 
-1. GET /jira/analyze-preview com chave_jira.
-2. Busca issue atual no Jira.
-3. Normaliza campos e gera embedding.
-4. Recupera similares.
-5. Gera texto de triagem e retorna preview.
+Corpo JSON mínimo:
 
-### 5.4 Análise com Postagem
+```json
+{"chave_jira": "PROJ-123"}
+```
 
-1. POST /jira/analyze-and-post com chave_jira.
-2. Executa pipeline de preview.
-3. Posta comentário interno via API Jira.
-4. Retorna comentário e referências.
+Campos opcionais (alinhados ao `process_issue`): por exemplo `saudacao_publica`, `transicionar`, `atribuir`, `comentario_interno`, `responsavel_account_id`, `nome_transicao`.
 
-### 5.5 Ingestão Histórica
-
-1. POST /jira/ingest com JQL (query ou configuração).
-2. Busca issues paginadas.
-3. Processa cada issue.
-4. Sincroniza escopo (remove fora da seleção).
-5. Commit e retorno de contagem.
-
-## 6. API (Contrato Funcional)
-
-1. GET /health
-- Objetivo: saúde do serviço.
-- Resposta: status e mensagem.
-
-2. POST /jira/webhook
-- Objetivo: ingestão incremental + triagem.
-- Entrada: chave, resumo, descrição, comentários, produto, status, datas.
-- Saída: confirmação de processamento.
-
-3. POST /chat/query
-- Objetivo: consulta semântica com resposta textual.
-- Entrada: pergunta.
-- Saída: resposta + lista de tickets relacionados.
-
-4. GET /jira/analyze-preview
-- Objetivo: gerar nota sem publicar.
-- Entrada: chave_jira.
-- Saída: comentário proposto + referências.
-
-5. POST /jira/analyze-and-post
-- Objetivo: gerar e publicar comentário interno.
-- Entrada: chave_jira.
-- Saída: comentário publicado + referências.
-
-6. POST /jira/ingest
-- Objetivo: ingestão em lote por JQL.
-- Entrada: jql, max_results.
-- Saída: total processado.
+Permissões AWS típicas do consumidor: `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` (conforme política da conta).
 
 ## 7. Configuração e Execução
 
 ### 7.1 Dependências
 
-- FastAPI, Uvicorn, SQLAlchemy, pgvector, psycopg2.
-- OpenAI SDK.
+- SQLAlchemy, Alembic; `psycopg2-binary` opcional (PostgreSQL).
+- boto3 (SQS), OpenAI SDK, httpx.
 - sentence-transformers + torch para embedding local.
-- openpyxl para planilhas.
+- openpyxl para planilhas (tools).
 
 ### 7.2 Variáveis de Ambiente Críticas
 
 - DATABASE_URL
-- JIRA_BASE_URL
-- JIRA_EMAIL
-- JIRA_API_TOKEN
+- JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN
 - GEMINI_API_KEY e/ou OPENAI_API_KEY
 - EMBEDDING_PROVIDER e LLM_PROVIDER
 - KNOWLEDGE_BASE_JQL e KNOWLEDGE_BASE_STATUSES
 - JIRA_POST_COMMENTS
+- SQS_QUEUE_URL, SQS_REGION e credenciais/IAM para a fila
 
-### 7.3 Docker
+### 7.3 Implantacao
 
-- Dockerfile para API Python 3.11.
-- docker-compose com:
-  - db: pgvector/pg16
-  - api: FastAPI
+- Worker Python na VM (venv, Agendador de Tarefas Windows ou equivalente); o repositorio nao inclui Dockerfile nem compose.
+- Banco: SQLite em arquivo local ou PostgreSQL instalado/gerenciado fora deste projeto, conforme `DATABASE_URL`.
 
 ## 8. Segurança e Governança Técnica
 
@@ -272,9 +206,9 @@ Arquitetura em camadas, com separação por domínio técnico:
 
 ### 8.2 Riscos e lacunas
 
-1. Ausência de autenticação/autorização na API.
-2. Sem rate limiting.
-3. Sem validação de tamanho de payloads.
+1. Superficie de ataque concentrada na VM (`.env`, IAM da instância, acesso à fila SQS); não há API HTTP no produto.
+2. Sem rate limiting explícito nas integrações Jira/LLM.
+3. Validação do corpo da mensagem SQS é mínima (JSON e campos esperados).
 4. Tratamento amplo de exceções pode esconder causa raiz.
 5. Sem política explícita de mascaramento de dados sensíveis nos logs.
 
@@ -286,10 +220,10 @@ Estado atual:
 - Sem tracing distribuído.
 
 Recomendado:
-- Logs estruturados em JSON.
-- Métricas Prometheus.
-- Correlation-id por request.
-- Dashboard de SLI/SLO para endpoints críticos.
+- Logs estruturados em JSON (`WORKER_LOG_FORMAT=json`).
+- Métricas e alertas no processo worker (CloudWatch ou agente local), se necessário.
+- Correlation-id por mensagem (chave Jira) já propagado nos logs.
+- SLI/SLO definidos para tempo de processamento por mensagem e taxa de erro na fila (DLQ).
 
 ## 10. Avaliação de Melhores Práticas
 
@@ -304,9 +238,9 @@ Recomendado:
 ### 10.2 Não conformidades / oportunidades
 
 Prioridade Alta:
-1. Implementar autenticação na API e proteção de endpoints administrativos.
-2. Criar suíte de testes automatizados (unitário, integração e contrato).
-3. Implementar limites e validações de entrada (tamanho, campos obrigatórios contextuais).
+1. Proteger superfície operacional (acesso à VM, rotação de segredos, política IAM mínima na fila).
+2. Expandir testes automatizados (unitário e integração dos serviços usados pelo worker).
+3. Validar e limitar tamanho/complexidade do JSON da mensagem SQS onde fizer sentido.
 
 Prioridade Média:
 1. Melhorar resiliência externa (retry com backoff e circuit breaker para Jira/LLM).
@@ -314,9 +248,9 @@ Prioridade Média:
 3. Introduzir migrações formais (Alembic) no lugar de migração ad-hoc.
 
 Prioridade Baixa:
-1. Definir versionamento semântico da API.
-2. Incluir documentação OpenAPI com exemplos de erro/sucesso reais.
-3. Padronizar linters/formatters e pipeline CI.
+1. Versionamento semântico do pacote worker e changelog.
+2. Padronizar linters/formatters e pipeline CI.
+3. DLQ e alarmes na fila SQS para mensagens problemáticas.
 
 ## 11. Checklist de Conformidade para Validação
 
@@ -327,8 +261,7 @@ Arquitetura
 - [ ] Dependências entre camadas sem acoplamento cíclico.
 
 Segurança
-- [ ] Endpoints protegidos por autenticação.
-- [ ] Limite de requisições por cliente.
+- [ ] Acesso à VM e ao `.env` restrito; IAM com permissão mínima na fila.
 - [ ] Segredos não expostos em logs.
 
 Dados
@@ -343,8 +276,8 @@ Confiabilidade
 
 Qualidade
 - [ ] Testes unitários cobrindo regras de negócio centrais.
-- [ ] Testes de integração para endpoints críticos.
-- [ ] Validação de schemas de entrada e saída.
+- [ ] Testes de integração para persistência e fluxos sem Jira real (mocks).
+- [ ] Validação do payload SQS e contratos internos entre serviços.
 
 Operação
 - [ ] Logs estruturados e centralizados.
@@ -355,8 +288,8 @@ Operação
 
 Fase 1 (curto prazo)
 1. Testes automatizados e CI.
-2. Autenticação, rate limiting e validação de payload.
-3. Logs estruturados com correlação de request.
+2. Validação de payload SQS e política IAM mínima.
+3. Logs estruturados com correlação por `chave_jira`.
 
 Fase 2 (médio prazo)
 1. Alembic + estratégia de versionamento de schema.
@@ -372,4 +305,4 @@ Fase 3 (evolução)
 
 ## Conclusão
 
-O projeto está bem estruturado para um MVP de assistência N1, com boas decisões de modularização e pipeline funcional de ingestão, retrieval e geração de texto. Para aderência robusta a melhores práticas de produção, os principais avanços devem focar em segurança de API, testes automatizados, observabilidade e governança de mudanças de banco e integrações externas.
+O projeto está bem estruturado para um MVP de assistência N1 orientado a fila, com modularização clara e pipeline de ingestão, retrieval e geração de texto. Para produção, priorizar segurança da VM e da fila, testes automatizados, observabilidade do worker e governança de schema (Alembic) e integrações externas (Jira/LLM).

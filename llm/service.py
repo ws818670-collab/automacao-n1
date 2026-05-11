@@ -9,10 +9,11 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from exceptions import JiraClientError, JiraIssueNotFoundError, LLMError
-from llm.prompts import build_chat_prompt, build_jira_analysis_prompt
+from llm.prompts import build_jira_analysis_prompt
 from jira.client import JiraClient, normalize_issue
 from utils.retry import external_retry
 from utils.config import get_settings
+from utils.logging import compact_error_message
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -32,7 +33,7 @@ class LLMService:
         similares: list[dict],
         produto: str = "",
     ) -> tuple[str, bool]:
-        top = similares[:3]
+        top = similares[:5]
         analysis = self._fallback_jira_analysis(resumo, descricao, top)
         fallback_used = True
 
@@ -43,40 +44,6 @@ class LLMService:
                 fallback_used = False
 
         return _render_jira_comment(analysis, top), fallback_used
-
-    def generate_chat_response(self, pergunta: str, similares: list[dict], produto: str = "") -> tuple[str, list[str], bool]:
-        top = similares[:3]
-        tickets = [s["chave_jira"] for s in top if s.get("chave_jira")]
-
-        chat_payload = self._fallback_chat_payload(pergunta, top)
-        fallback_used = True
-        if self._llm_available():
-            generated = self._generate_chat_payload_llm(pergunta, top, produto)
-            if generated:
-                chat_payload = generated
-                fallback_used = False
-
-        return _render_chat_response(chat_payload, tickets), tickets, fallback_used
-
-    def chat_query(
-        self,
-        db: Session,
-        pergunta: str,
-        embedding_service,
-        retrieval_service,
-        allowed_statuses: list[str],
-        produto: str = "",
-    ) -> tuple[str, list[str], bool]:
-        vector = embedding_service.embed(pergunta)
-        similares = retrieval_service.find_similar(
-            db,
-            vector,
-            top_k=settings.top_k_similar,
-            allowed_statuses=allowed_statuses,
-            query_text=pergunta,
-            query_produto=produto,
-        )
-        return self.generate_chat_response(pergunta, similares, produto)
 
     def generate_triage_comment(
         self,
@@ -141,30 +108,11 @@ class LLMService:
         try:
             data = _loads_json_loose(raw)
             return _normalize_jira_analysis(data)
-        except Exception:
-            logger.exception("Falha ao gerar analise Jira via LLM; aplicando fallback")
-            return None
-
-    def _generate_chat_payload_llm(self, pergunta: str, similares: list[dict], produto: str = "") -> dict[str, str] | None:
-        role_ctx = settings.n1_role_description.strip()
-        prompt = build_chat_prompt(role_ctx, produto)
-        payload = {
-            "pergunta": pergunta,
-            "produto": produto,
-            "tickets_contexto": similares,
-        }
-        raw = self._request_llm_json(prompt, payload)
-        if not raw:
-            return None
-        try:
-            data = _loads_json_loose(raw)
-            return {
-                "sintese": str(data.get("sintese", "")).strip(),
-                "padrao_observado": str(data.get("padrao_observado", "")).strip(),
-                "solucao_recorrente": str(data.get("solucao_recorrente", "")).strip(),
-            }
-        except Exception:
-            logger.exception("Falha ao gerar resposta de chat via LLM; aplicando fallback")
+        except Exception as exc:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.exception("Falha ao gerar analise Jira via LLM; aplicando fallback")
+            else:
+                logger.error("Falha ao gerar analise Jira (fallback): %s", compact_error_message(exc))
             return None
 
     def _llm_available(self) -> bool:
@@ -210,8 +158,11 @@ class LLMService:
                 },
             )
             return response.output_text.strip()
-        except Exception:
-            logger.exception("Falha na chamada OpenAI")
+        except Exception as exc:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.exception("Falha na chamada OpenAI")
+            else:
+                logger.error("Falha na chamada OpenAI: %s", compact_error_message(exc))
             return None
 
     @external_retry()
@@ -267,8 +218,11 @@ class LLMService:
                 },
             )
             return "\n".join(text_parts).strip() or None
-        except Exception:
-            logger.exception("Falha na chamada Gemini")
+        except Exception as exc:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.exception("Falha na chamada Gemini")
+            else:
+                logger.error("Falha na chamada Gemini: %s", compact_error_message(exc))
             return None
 
     @external_retry()
@@ -311,64 +265,6 @@ class LLMService:
             "indicacao": indicacao,
             "confianca": confianca,
         }
-
-    def _fallback_chat_payload(self, pergunta: str, similares: list[dict]) -> dict[str, str]:
-        solutions = [
-            str(s["solucao"]).strip()
-            for s in similares
-            if s.get("solucao") and "sem solucao" not in str(s["solucao"]).lower()
-        ]
-        solution = solutions[0] if solutions else "Sem solucao documentada na base para este tema."
-
-        if similares:
-            temas = list({s.get("subtema") or s.get("tema") or "" for s in similares if s.get("tema")})
-            temas_str = ", ".join(t for t in temas if t)
-            pattern = (
-                f"Encontrados {len(similares)} chamados relacionados"
-                + (f" nos temas: {temas_str}" if temas_str else ".")
-                + ". Padrão recorrente identificado na base."
-            )
-        else:
-            pattern = "Base historica insuficiente para identificar padrao."
-
-        return {
-            "sintese": f"Consulta: {pergunta}",
-            "padrao_observado": pattern,
-            "solucao_recorrente": solution,
-        }
-
-
-def _jira_format_hint() -> str:
-    return (
-        "Triagem de conhecimento\\n"
-        "Cenario identificado:\\n"
-        "[descricao objetiva do problema]\\n"
-        "Chamados relacionados:\\n"
-        "- [ticket] - [descricao curta]\\n"
-        "- [ticket] - [descricao curta]\\n"
-        "Proposta de solucao:\\n"
-        "[descricao clara da solucao]\\n"
-        "Passos sugeridos para o N1:\\n"
-        "1. ...\\n"
-        "2. ...\\n"
-        "3. ...\\n"
-        "Indicacao: [Resolver no N1 / Avaliar / Encaminhar N2]\\n"
-        "Confianca da recomendacao: [Baixa | Media | Alta]"
-    )
-
-
-def _chat_format_hint() -> str:
-    return (
-        "Sintese:\\n"
-        "[descricao do problema encontrado]\\n"
-        "Padrao observado:\\n"
-        "[explicacao do comportamento recorrente]\\n"
-        "Solucao mais recorrente:\\n"
-        "[descricao da solucao]\\n"
-        "Chamados de referencia:\\n"
-        "- [ticket]\\n"
-        "- [ticket]"
-    )
 
 
 def _confidence_label(value: float) -> str:
@@ -587,20 +483,6 @@ def _build_criterios_escalonamento_lista(similares: list[dict]) -> list[str]:
         "Escalar se o procedimento padrao for seguido e o resultado continuar incorreto.",
         "Escalar se houver dependencia de ajuste tecnico em integracoes (ex: NetSuite).",
     ]
-
-
-def _render_chat_response(payload: dict[str, str], tickets: list[str]) -> str:
-    refs = "\n".join(f"- {ticket}" for ticket in tickets) or "- N/A"
-    return (
-        "Sintese:\n"
-        f"{payload.get('sintese', 'Sem sintese disponivel.')}\n"
-        "Padrao observado:\n"
-        f"{payload.get('padrao_observado', 'Sem padrao identificado.')}\n"
-        "Solucao mais recorrente:\n"
-        f"{payload.get('solucao_recorrente', 'Sem solucao recorrente identificada.')}\n"
-        "Chamados de referencia:\n"
-        f"{refs}"
-    )
 
 
 def _extract_cenario(resumo: str, descricao: str) -> str:

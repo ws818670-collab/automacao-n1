@@ -2,8 +2,8 @@ import re
 import unicodedata
 
 
-def consolidate_ticket_text(resumo: str, descricao: str, comentarios: str) -> str:
-    blocks = [resumo or "", descricao or "", comentarios or ""]
+def consolidate_ticket_text(resumo: str, descricao: str, comentarios: str, tema_chamado: str = "") -> str:
+    blocks = [resumo or "", tema_chamado or "", descricao or "", comentarios or ""]
     consolidated = "\n\n".join(b.strip() for b in blocks if b and b.strip())
     return clean_text(consolidated)
 

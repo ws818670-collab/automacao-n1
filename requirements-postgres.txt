@@ -1,0 +1,3 @@
+# Instale so se usar DATABASE_URL=postgresql+psycopg2://...
+# Em Python 3.14+ pode nao haver wheel: use Python 3.11/3.12 LTS ou instale PostgreSQL com pg_config.
+psycopg2-binary==2.9.10

@@ -86,10 +86,12 @@ class RetrievalService:
 
         for payload in candidates:
             hybrid_score = float(payload.get("confianca", 0.0))
+            vector_score = float(payload.get("score_semantico", 0.0))
             keyword_score = float(payload.get("score_lexico", 0.0))
             taxonomy_score = float(payload.get("score_taxonomia", 0.0))
             intent_score = float(payload.get("score_intencao", 0.0))
             title_score = float(payload.get("score_titulo", 0.0))
+            product_score = float(payload.get("score_produto", 0.0))
 
             if query_subtheme == "Relatorios e extracao":
                 is_exact_report_match = taxonomy_score >= 1.0
@@ -97,8 +99,9 @@ class RetrievalService:
                 if not is_exact_report_match and not has_report_evidence:
                     continue
 
-            # Strong lexical and taxonomy matches should survive even if they were not strong vector neighbors.
-            if hybrid_score < threshold and max(keyword_score, taxonomy_score, intent_score, title_score) < 0.4:
+            # Taxonomy-only matches are often too broad and lead to repetitive references.
+            # Require at least one contextual signal beyond taxonomy when score is below threshold.
+            if hybrid_score < threshold and max(vector_score, keyword_score, intent_score, title_score, product_score) < 0.4:
                 continue
             payload["threshold_aplicado"] = threshold
             result.append(payload)
@@ -120,8 +123,11 @@ class RetrievalService:
 
 
 def _ticket_to_payload(ticket: Ticket, score: float) -> dict:
-    categoria = ticket.analise.categoria if ticket.analise else "Geral|Analise funcional"
+    analise = getattr(ticket, "analise", None)
+    categoria = analise.categoria if analise and getattr(analise, "categoria", "") else "Geral|Analise funcional"
     tema, subtema = _split_category(categoria)
+    data_criacao_value = getattr(ticket, "data_criacao", None)
+    data_criacao = data_criacao_value.strftime("%Y-%m-%d") if data_criacao_value else None
     return {
         "ticket_id": ticket.id,
         "chave_jira": ticket.chave_jira,
@@ -129,9 +135,10 @@ def _ticket_to_payload(ticket: Ticket, score: float) -> dict:
         "descricao": ticket.descricao,
         "comentarios": ticket.comentarios,
         "produto": getattr(ticket, "produto", "") or "",
-        "status": ticket.status,
-        "problema": ticket.analise.problema if ticket.analise else "",
-        "solucao": ticket.analise.solucao if ticket.analise else "",
+        "status": getattr(ticket, "status", "") or "",
+        "data_criacao": data_criacao,
+        "problema": analise.problema if analise else "",
+        "solucao": analise.solucao if analise else "",
         "tema": tema,
         "subtema": subtema,
         "confianca": score,
@@ -388,11 +395,12 @@ def _is_noise_ticket(ticket: Ticket) -> bool:
     return any(marker in text for marker in noise_markers)
 
 
-def _result_sort_key(item: dict) -> tuple[float, float, float, float, float]:
+def _result_sort_key(item: dict) -> tuple[float, float, float, float, float, float]:
     return (
+        float(item.get("confianca", 0.0)),
+        float(item.get("score_semantico", 0.0)),
+        float(item.get("score_lexico", 0.0)),
         float(item.get("score_taxonomia", 0.0)),
         float(item.get("score_intencao", 0.0)),
         float(item.get("score_titulo", 0.0)),
-        float(item.get("score_lexico", 0.0)),
-        float(item.get("confianca", 0.0)),
     )

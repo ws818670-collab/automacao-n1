@@ -70,14 +70,18 @@ class IngestionService:
                 ticket_data.get("resumo", ""),
                 ticket_data.get("descricao", ""),
                 ticket_data.get("comentarios", ""),
+                ticket_data.get("tema_chamado", ""),
             )
             consolidation_ms = round((perf_counter() - started_at) * 1000, 2)
 
             analysis_started = perf_counter()
+            query_context = " ".join(
+                part for part in [ticket_data.get("resumo", ""), ticket_data.get("descricao", ""), ticket_data.get("tema_chamado", "")] if part
+            )
             problema, solucao, contexto = extract_problem_solution_context(consolidated)
             tema, subtema = classify_ticket_theme(
-                ticket_data.get("resumo", ""),
-                ticket_data.get("descricao", ""),
+                query_context,
+                query_context,
                 ticket_data.get("comentarios", ""),
                 ticket_data.get("produto", ""),
             )
