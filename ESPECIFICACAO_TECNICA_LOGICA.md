@@ -20,7 +20,7 @@ Arquitetura em camadas, com separação por domínio técnico:
 - Processing: consolidação textual, heurísticas de problema/solução, classificação de tema.
 - Embeddings: geração vetorial local/OpenAI e adaptação de dimensão.
 - Retrieval: ranking híbrido (vetorial + léxico + taxonomia + intenção + título + produto).
-- LLM: geração de comentário de triagem com fallback heurístico (Gemini/OpenAI/auto).
+- LLM: geração de comentário de triagem via Amazon Bedrock com fallback heurístico.
 - Jira: integração REST para leitura de issues e postagem de comentário interno.
 - Models: persistência SQLAlchemy; PostgreSQL opcional com extensão `vector` quando aplicável.
 - Tools: scripts operacionais para exportação e importação de bases.
@@ -87,7 +87,7 @@ Arquitetura em camadas, com separação por domínio técnico:
 
 - llm/service.py
   - Geração de comentário de triagem (análise Jira).
-  - Suporte a Gemini/OpenAI/auto.
+  - Amazon Bedrock (Converse API).
   - Fallback estruturado quando LLM indisponível.
 
 ### 3.5 Integração Jira
@@ -185,7 +185,7 @@ Permissões AWS típicas do consumidor: `sqs:ReceiveMessage`, `sqs:DeleteMessage
 
 - DATABASE_URL
 - JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN
-- GEMINI_API_KEY e/ou OPENAI_API_KEY
+- Credenciais AWS (Bedrock) e OPENAI_API_KEY se EMBEDDING_PROVIDER=openai
 - EMBEDDING_PROVIDER e LLM_PROVIDER
 - KNOWLEDGE_BASE_JQL e KNOWLEDGE_BASE_STATUSES
 - JIRA_POST_COMMENTS

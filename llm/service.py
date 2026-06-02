@@ -4,13 +4,12 @@ import re
 from time import perf_counter
 from typing import Any
 
-import httpx
-from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from exceptions import JiraClientError, JiraIssueNotFoundError, LLMError
 from llm.prompts import build_jira_analysis_prompt
 from jira.client import JiraClient, normalize_issue
+from utils.bedrock_client import make_bedrock_runtime_client
 from utils.retry import external_retry
 from utils.config import get_settings
 from utils.logging import compact_error_message
@@ -21,10 +20,8 @@ settings = get_settings()
 
 class LLMService:
     def __init__(self) -> None:
-        self._llm_provider = settings.llm_provider.strip().lower() or "auto"
-        self._openai_client = OpenAI(api_key=settings.openai_api_key_value()) if settings.openai_api_key_value() else None
-        self._gemini_api_key = settings.gemini_api_key_value().strip()
-        self._gemini_model = settings.gemini_model.strip() or "gemini-2.5-flash"
+        self._bedrock_model = settings.bedrock_model.strip() or "amazon.nova-lite-v1:0"
+        self._bedrock_client = make_bedrock_runtime_client(settings)
 
     def generate_jira_analysis_comment(
         self,
@@ -116,128 +113,52 @@ class LLMService:
             return None
 
     def _llm_available(self) -> bool:
-        if self._llm_provider == "gemini":
-            return bool(self._gemini_api_key)
-        if self._llm_provider == "openai":
-            return self._openai_client is not None
-        if self._llm_provider == "auto":
-            return bool(self._gemini_api_key) or self._openai_client is not None
-        return bool(self._gemini_api_key)
+        return True
 
     def _request_llm_json(self, prompt: str, payload: dict[str, Any]) -> str | None:
-        providers: list[str]
-        if self._llm_provider == "auto":
-            providers = ["gemini", "openai"]
-        elif self._llm_provider in {"gemini", "openai"}:
-            providers = [self._llm_provider]
-        else:
-            providers = ["gemini"]
+        return self._request_bedrock(prompt, payload)
 
-        for provider in providers:
-            if provider == "gemini" and self._gemini_api_key:
-                text = self._request_gemini(prompt, payload)
-                if text:
-                    return text
-            if provider == "openai" and self._openai_client is not None:
-                text = self._request_openai(prompt, payload)
-                if text:
-                    return text
-        return None
-
-    def _request_openai(self, prompt: str, payload: dict[str, Any]) -> str | None:
+    def _request_bedrock(self, prompt: str, payload: dict[str, Any]) -> str | None:
         started_at = perf_counter()
         try:
-            response = self._request_openai_raw(prompt, payload)
-            usage = getattr(response, "usage", None)
-            logger.info(
-                "llm_call_completed",
-                extra={
-                    "provider": "openai",
-                    "duration_ms": round((perf_counter() - started_at) * 1000, 2),
-                    "tokens_total": getattr(usage, "total_tokens", None),
-                },
-            )
-            return response.output_text.strip()
-        except Exception as exc:
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.exception("Falha na chamada OpenAI")
-            else:
-                logger.error("Falha na chamada OpenAI: %s", compact_error_message(exc))
-            return None
-
-    @external_retry()
-    def _request_openai_raw(self, prompt: str, payload: dict[str, Any]):
-        try:
-            return self._openai_client.responses.create(
-                model=settings.llm_model,
-                input=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-                temperature=0.2,
-            )
-        except Exception as exc:
-            raise LLMError("Falha na chamada OpenAI") from exc
-
-    def _request_gemini(self, prompt: str, payload: dict[str, Any]) -> str | None:
-        started_at = perf_counter()
-        model = self._gemini_model
-        if model.startswith("models/"):
-            model = model.split("models/", 1)[1]
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        body = {
-            "system_instruction": {
-                "parts": [
-                    {"text": prompt},
-                ]
-            },
-            "contents": [
-                {
-                    "parts": [
-                        {"text": json.dumps(payload, ensure_ascii=False)},
-                    ]
-                }
-            ],
-            "generationConfig": {"temperature": 0.2},
-        }
-        try:
-            response = self._request_gemini_raw(endpoint, body)
-            data = response.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return None
-            parts = candidates[0].get("content", {}).get("parts", [])
+            response = self._request_bedrock_raw(prompt, payload)
+            message = response.get("output", {}).get("message", {})
+            parts = message.get("content", [])
             text_parts = [str(part.get("text", "")).strip() for part in parts if part.get("text")]
-            usage = data.get("usageMetadata", {})
+            usage = response.get("usage", {})
             logger.info(
                 "llm_call_completed",
                 extra={
-                    "provider": "gemini",
+                    "provider": "bedrock",
+                    "model": self._bedrock_model,
                     "duration_ms": round((perf_counter() - started_at) * 1000, 2),
-                    "tokens_total": usage.get("totalTokenCount"),
+                    "tokens_total": usage.get("totalTokens"),
                 },
             )
             return "\n".join(text_parts).strip() or None
         except Exception as exc:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.exception("Falha na chamada Gemini")
+                logger.exception("Falha na chamada Bedrock")
             else:
-                logger.error("Falha na chamada Gemini: %s", compact_error_message(exc))
+                logger.error("Falha na chamada Bedrock: %s", compact_error_message(exc))
             return None
 
     @external_retry()
-    def _request_gemini_raw(self, endpoint: str, body: dict[str, Any]) -> httpx.Response:
+    def _request_bedrock_raw(self, prompt: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            response = httpx.post(
-                endpoint,
-                params={"key": self._gemini_api_key},
-                json=body,
-                timeout=settings.external_timeout_seconds,
+            return self._bedrock_client.converse(
+                modelId=self._bedrock_model,
+                system=[{"text": prompt}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"text": json.dumps(payload, ensure_ascii=False)}],
+                    }
+                ],
+                inferenceConfig={"temperature": 0.2, "maxTokens": 4096},
             )
-            response.raise_for_status()
-            return response
         except Exception as exc:
-            raise LLMError("Falha na chamada Gemini") from exc
+            raise LLMError("Falha na chamada Bedrock") from exc
 
     def _fallback_jira_analysis(self, resumo: str, descricao: str, similares: list[dict]) -> dict[str, Any]:
         confianca_val = similares[0].get("confianca", 0.3) if similares else 0.3

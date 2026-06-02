@@ -73,10 +73,12 @@ class Settings(BaseSettings):
     aws_access_key_id: SecretStr | None = Field(default=None, alias="AWS_ACCESS_KEY_ID")
     aws_secret_access_key: SecretStr | None = Field(default=None, alias="AWS_SECRET_ACCESS_KEY")
 
-    llm_provider: Literal["gemini", "openai", "auto"] = Field(default="auto", alias="LLM_PROVIDER")
+    llm_provider: Literal["bedrock"] = Field(default="bedrock", alias="LLM_PROVIDER")
     openai_api_key: SecretStr | None = Field(default=None, alias="OPENAI_API_KEY")
     gemini_api_key: SecretStr | None = Field(default=None, alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
+    bedrock_model: str = Field(default="amazon.nova-lite-v1:0", alias="BEDROCK_MODEL")
+    bedrock_region: str = Field(default="", alias="BEDROCK_REGION")
     embedding_provider: Literal["local", "openai"] = Field(default="local", alias="EMBEDDING_PROVIDER")
     embedding_model: str = Field(default="text-embedding-3-small", alias="EMBEDDING_MODEL")
     local_embedding_model: str = Field(
@@ -145,14 +147,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _validate_provider_configuration(self) -> "Settings":
         has_openai = bool(self.openai_api_key and self.openai_api_key.get_secret_value().strip())
-        has_gemini = bool(self.gemini_api_key and self.gemini_api_key.get_secret_value().strip())
 
-        if self.llm_provider == "openai" and not has_openai:
-            raise ValueError("OPENAI_API_KEY obrigatoria quando LLM_PROVIDER=openai")
-        if self.llm_provider == "gemini" and not has_gemini:
-            raise ValueError("GEMINI_API_KEY obrigatoria quando LLM_PROVIDER=gemini")
-        if self.llm_provider == "auto" and not (has_openai or has_gemini):
-            raise ValueError("Configure OPENAI_API_KEY ou GEMINI_API_KEY quando LLM_PROVIDER=auto")
         if self.embedding_provider == "openai" and not has_openai:
             raise ValueError("OPENAI_API_KEY obrigatoria quando EMBEDDING_PROVIDER=openai")
 
@@ -183,6 +178,14 @@ class Settings(BaseSettings):
 
     def gemini_api_key_value(self) -> str:
         return self.gemini_api_key.get_secret_value() if self.gemini_api_key else ""
+
+    def has_aws_credentials(self) -> bool:
+        if not self.aws_access_key_id or not self.aws_secret_access_key:
+            return False
+        return bool(
+            self.aws_access_key_id.get_secret_value().strip()
+            and self.aws_secret_access_key.get_secret_value().strip()
+        )
 
 
 @lru_cache

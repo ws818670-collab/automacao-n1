@@ -24,7 +24,7 @@ Detalhes de banco, agendador na EC2 e testes: secoes [Configuracao](#configuraca
 - Python
 - SQLite (arquivo local; vetores em JSON, similaridade calculada em Python)
 - Jira REST API
-- OpenAI (embeddings) e/ou Gemini (LLM) e embeddings locais (sentence-transformers) quando configurado
+- Amazon Bedrock (LLM de triagem) e embeddings locais (sentence-transformers) ou OpenAI quando configurado
 - AWS SQS (consumer dedicado)
 
 ## Versao do Python (importante no Windows)
@@ -57,7 +57,7 @@ project/
 
 1. Copie `.env.example` para `.env`.
 2. Ajuste `DATABASE_URL` (veja abaixo).
-3. Preencha credenciais **Jira**, **LLM** (OpenAI e/ou Gemini), **SQS** (`SQS_QUEUE_URL`, `SQS_REGION`, etc.) e acesso **AWS** (IAM Role na EC2, `aws configure` ou variaveis de ambiente).
+3. Preencha credenciais **Jira**, **LLM Bedrock** (`BEDROCK_MODEL` + modelo habilitado no console), **SQS** (`SQS_QUEUE_URL`, `SQS_REGION`, etc.) e **AWS** (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, IAM Role na EC2 ou `aws configure`).
 
 **Banco local (recomendado, sem servidor de banco):**
 
@@ -191,5 +191,5 @@ Campos opcionais alinham-se aos argumentos de `JiraFlowService.process_issue` (e
 ## Observacoes
 - O sistema nao responde cliente final automaticamente
 - As sugestoes sao apoio ao analista N1
-- Sem chave OpenAI para LLM, configure Gemini ou ajuste `LLM_PROVIDER` conforme o `.env`
+- LLM de triagem usa somente Bedrock; credenciais AWS e modelo habilitado na regiao — veja `.env.example`
 - `EMBEDDING_PROVIDER=local` usa modelos sentence-transformers (pode exigir mais tempo na primeira carga do modelo)

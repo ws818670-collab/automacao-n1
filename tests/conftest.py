@@ -15,7 +15,7 @@ def configured_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JIRA_EMAIL", "test@example.com")
     monkeypatch.setenv("JIRA_API_TOKEN", "token")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
-    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_PROVIDER", "bedrock")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "openai")
 
     from utils.config import get_settings
@@ -38,7 +38,7 @@ def sqlite_session(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("JIRA_EMAIL", "test@example.com")
     monkeypatch.setenv("JIRA_API_TOKEN", "token")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
-    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_PROVIDER", "bedrock")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "openai")
 
     from utils.config import get_settings
