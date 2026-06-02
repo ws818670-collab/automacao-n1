@@ -2,6 +2,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from time import perf_counter
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,9 @@ from embeddings.service import EmbeddingService
 from jira.client import JiraClient, normalize_issue
 from models.repositories import sync_ticket_scope, upsert_analise, upsert_embedding, upsert_ticket
 from processing.text_processing import classify_ticket_theme, consolidate_ticket_text, extract_problem_solution_context
+
+if TYPE_CHECKING:
+    from vector.qdrant_store import QdrantVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +30,11 @@ class IngestionService:
         self,
         jira_client: JiraClient,
         embedding_service: EmbeddingService,
+        vector_store: "QdrantVectorStore | None" = None,
     ) -> None:
         self.jira_client = jira_client
         self.embedding_service = embedding_service
+        self.vector_store = vector_store
 
     def ingest_historical(self, db: Session, jql: str, max_results: int = 0) -> IngestionResult:
         issues = self.jira_client.search_issues(jql, max_results=max_results)
@@ -36,6 +42,7 @@ class IngestionService:
         sync_ticket_scope(
             db,
             {issue.get("chave_jira", "") for issue in normalized_issues if issue.get("chave_jira")},
+            self.vector_store,
         )
         result = IngestionResult()
         for normalized in normalized_issues:
@@ -103,7 +110,16 @@ class IngestionService:
 
             embedding_started = perf_counter()
             vector = self.embedding_service.embed(consolidated)
-            upsert_embedding(db, ticket_id=ticket.id, vector=vector)
+            if self.vector_store is not None:
+                self.vector_store.upsert(
+                    ticket_id=ticket.id,
+                    chave_jira=ticket.chave_jira,
+                    vector=vector,
+                    status=ticket.status or "",
+                    produto=ticket.produto or "",
+                )
+            else:
+                upsert_embedding(db, ticket_id=ticket.id, vector=vector)
             embedding_ms = round((perf_counter() - embedding_started) * 1000, 2)
 
             upsert_analise(

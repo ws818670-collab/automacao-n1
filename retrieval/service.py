@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
@@ -8,13 +9,22 @@ from models.repositories import get_recent_tickets, search_similar_tickets
 from processing.text_processing import infer_query_theme
 from utils.config import get_settings
 
+if TYPE_CHECKING:
+    from vector.qdrant_store import QdrantVectorStore
+
 settings = get_settings()
 
 
 class RetrievalService:
-    def __init__(self, top_k: int = 5, min_score: float = 0.75) -> None:
+    def __init__(
+        self,
+        top_k: int = 5,
+        min_score: float = 0.75,
+        vector_store: "QdrantVectorStore | None" = None,
+    ) -> None:
         self.top_k = top_k
         self.min_score = min_score
+        self.vector_store = vector_store
 
     def find_similar(
         self,
@@ -35,6 +45,7 @@ class RetrievalService:
             top_k=candidate_top_k,
             exclude_ticket_key=exclude_ticket_key,
             allowed_statuses=allowed_statuses,
+            vector_store=self.vector_store,
         )
         base_threshold = min_score if min_score is not None else self.min_score
         result: list[dict] = []

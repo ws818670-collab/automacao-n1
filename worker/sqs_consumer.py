@@ -36,6 +36,7 @@ from jira.client import JiraClient
 from jira.flow_service import JiraFlowService
 from llm.service import LLMService
 from retrieval.service import RetrievalService
+from vector.factory import build_vector_store
 from exceptions import (
     EmbeddingError,
     IngestionError,
@@ -87,14 +88,17 @@ def _build_flow_service() -> JiraFlowService:
     settings = get_settings()
     jira_client = JiraClient()
     embedding_service = EmbeddingService()
+    vector_store = build_vector_store()
     llm_service = LLMService()
     retrieval_service = RetrievalService(
         top_k=settings.top_k_similar,
         min_score=settings.min_similarity_score,
+        vector_store=vector_store,
     )
     ingestion_service = IngestionService(
         jira_client=jira_client,
         embedding_service=embedding_service,
+        vector_store=vector_store,
     )
     knowledge_statuses = settings.knowledge_base_statuses_list()
 

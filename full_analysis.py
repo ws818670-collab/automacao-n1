@@ -6,7 +6,8 @@ from llm.service import LLMService
 from embeddings.service import EmbeddingService
 from retrieval.service import RetrievalService
 from ingestion.service import IngestionService
-from models.database import engine, SessionLocal, init_db
+from vector.factory import build_vector_store
+from models.database import SessionLocal, init_db
 from utils.config import get_settings
 
 ISSUE_KEY = 'JDMSN1-2709'
@@ -30,8 +31,9 @@ try:
     client = JiraClient()
     llm = LLMService()
     embedding_service = EmbeddingService()
-    retrieval_service = RetrievalService()
-    ingestion_service = IngestionService(client, embedding_service)
+    vector_store = build_vector_store()
+    retrieval_service = RetrievalService(vector_store=vector_store)
+    ingestion_service = IngestionService(client, embedding_service, vector_store=vector_store)
 
     allowed_statuses = settings.knowledge_base_statuses_list()
 

@@ -1,10 +1,14 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import numpy as np
 from sqlalchemy import Select, delete, select
 from sqlalchemy.orm import Session, joinedload
 
 from models.entities import Analise, Embedding, Ticket
+
+if TYPE_CHECKING:
+    from vector.qdrant_store import QdrantVectorStore
 
 
 def upsert_ticket(
@@ -109,11 +113,23 @@ def search_similar_tickets(
     top_k: int = 5,
     exclude_ticket_key: str | None = None,
     allowed_statuses: list[str] | None = None,
+    vector_store: "QdrantVectorStore | None" = None,
 ) -> list[tuple[Ticket, float]]:
     """
-    Busca os tickets mais similares usando distância coseno calculada em Python.
-    Funciona com SQLite e PostgreSQL sem extensões de servidor.
+    Busca os tickets mais similares.
+    Com Qdrant: busca vetorial no servidor e carrega metadados no SQL.
+    Sem Qdrant: distância coseno calculada em Python a partir da tabela embeddings.
     """
+    if vector_store is not None:
+        return _search_similar_via_qdrant(
+            db,
+            vector,
+            top_k=top_k,
+            exclude_ticket_key=exclude_ticket_key,
+            allowed_statuses=allowed_statuses,
+            vector_store=vector_store,
+        )
+
     stmt = (
         select(Ticket)
         .join(Embedding, Embedding.ticket_id == Ticket.id)
@@ -155,6 +171,43 @@ def search_similar_tickets(
     return scored[:top_k]
 
 
+def _search_similar_via_qdrant(
+    db: Session,
+    vector: list[float],
+    *,
+    top_k: int,
+    exclude_ticket_key: str | None,
+    allowed_statuses: list[str] | None,
+    vector_store: "QdrantVectorStore",
+) -> list[tuple[Ticket, float]]:
+    id_distance_pairs = vector_store.search(
+        vector,
+        top_k=top_k,
+        exclude_ticket_key=exclude_ticket_key,
+        allowed_statuses=allowed_statuses,
+    )
+    if not id_distance_pairs:
+        return []
+
+    ticket_ids = [ticket_id for ticket_id, _ in id_distance_pairs]
+    distance_by_id = {ticket_id: distance for ticket_id, distance in id_distance_pairs}
+
+    stmt = (
+        select(Ticket)
+        .options(joinedload(Ticket.analise))
+        .where(Ticket.id.in_(ticket_ids))
+    )
+    tickets = {ticket.id: ticket for ticket in db.scalars(stmt).unique().all()}
+
+    results: list[tuple[Ticket, float]] = []
+    for ticket_id in ticket_ids:
+        ticket = tickets.get(ticket_id)
+        if ticket is None:
+            continue
+        results.append((ticket, distance_by_id[ticket_id]))
+    return results
+
+
 def _cosine_distance(
     query_vec: np.ndarray,
     query_norm: float,
@@ -168,8 +221,10 @@ def _cosine_distance(
     return float(1.0 - similarity)
 
 
-def sync_ticket_scope(db: Session, allowed_keys: set[str]) -> None:
+def sync_ticket_scope(db: Session, allowed_keys: set[str], vector_store: "QdrantVectorStore | None" = None) -> None:
     if not allowed_keys:
+        if vector_store is not None:
+            vector_store.delete_all()
         db.execute(delete(Analise))
         db.execute(delete(Embedding))
         db.execute(delete(Ticket))
@@ -181,6 +236,9 @@ def sync_ticket_scope(db: Session, allowed_keys: set[str]) -> None:
     )
     if not stale_ids:
         return
+
+    if vector_store is not None:
+        vector_store.delete_by_ticket_ids(stale_ids)
 
     db.execute(delete(Analise).where(Analise.ticket_id.in_(stale_ids)))
     db.execute(delete(Embedding).where(Embedding.ticket_id.in_(stale_ids)))

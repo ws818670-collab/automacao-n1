@@ -31,6 +31,7 @@ from jira.client import JiraClient, normalize_issue
 from models.database import SessionLocal, init_db
 from models.repositories import sync_ticket_scope
 from utils.config import get_settings
+from vector.factory import build_vector_store
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,7 +90,8 @@ def main() -> None:
 
     jira_client = JiraClient()
     embedding_service = EmbeddingService()
-    ingestion_service = IngestionService(jira_client, embedding_service)
+    vector_store = build_vector_store()
+    ingestion_service = IngestionService(jira_client, embedding_service, vector_store=vector_store)
 
     db = SessionLocal()
     total_processed = 0
@@ -143,7 +145,7 @@ def main() -> None:
 
         # Remove do banco qualquer ticket fora da lista curada
         logger.info("Sincronizando base: removendo tickets fora da curadoria...")
-        sync_ticket_scope(db, set(curated_keys))
+        sync_ticket_scope(db, set(curated_keys), vector_store)
 
         db.commit()
         logger.info(

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     database_url: str = Field(alias="DATABASE_URL")
     db_pool_size: int = Field(default=5, alias="DB_POOL_SIZE")
     db_max_overflow: int = Field(default=10, alias="DB_MAX_OVERFLOW")
+    qdrant_url: str = Field(default="", alias="QDRANT_URL")
+    qdrant_api_key: SecretStr | None = Field(default=None, alias="QDRANT_API_KEY")
+    qdrant_collection: str = Field(default="jira_ticket_embeddings", alias="QDRANT_COLLECTION")
     embedding_dimension: int = Field(default=1536, alias="EMBEDDING_DIMENSION")
     top_k_similar: int = Field(default=5, alias="TOP_K_SIMILAR")
     min_similarity_score: float = Field(default=0.75, alias="MIN_SIMILARITY_SCORE")
@@ -151,6 +154,9 @@ class Settings(BaseSettings):
         if self.embedding_provider == "openai" and not has_openai:
             raise ValueError("OPENAI_API_KEY obrigatoria quando EMBEDDING_PROVIDER=openai")
 
+        if self.uses_qdrant() and not self.qdrant_api_key_value():
+            raise ValueError("QDRANT_API_KEY obrigatoria quando QDRANT_URL estiver definida")
+
         total_weight = (
             self.retrieval_vector_weight
             + self.retrieval_lexical_weight
@@ -175,6 +181,12 @@ class Settings(BaseSettings):
 
     def openai_api_key_value(self) -> str:
         return self.openai_api_key.get_secret_value() if self.openai_api_key else ""
+
+    def qdrant_api_key_value(self) -> str:
+        return self.qdrant_api_key.get_secret_value() if self.qdrant_api_key else ""
+
+    def uses_qdrant(self) -> bool:
+        return bool(self.qdrant_url.strip())
 
     def gemini_api_key_value(self) -> str:
         return self.gemini_api_key.get_secret_value() if self.gemini_api_key else ""

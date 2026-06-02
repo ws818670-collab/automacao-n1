@@ -27,6 +27,7 @@ from ingestion.service import IngestionService
 from jira.client import JiraClient
 from models.database import SessionLocal, init_db
 from models.repositories import sync_ticket_scope
+from vector.factory import build_vector_store
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,7 +66,8 @@ def main() -> None:
     init_db()
     jira_client = JiraClient()
     embedding_service = EmbeddingService()
-    ingestion_service = IngestionService(jira_client, embedding_service)
+    vector_store = build_vector_store()
+    ingestion_service = IngestionService(jira_client, embedding_service, vector_store=vector_store)
 
     db = SessionLocal()
     processed = 0
@@ -103,7 +105,7 @@ def main() -> None:
                 if processed % 200 == 0:
                     logger.info("Processados %d tickets...", processed)
 
-        sync_ticket_scope(db, allowed_keys)
+        sync_ticket_scope(db, allowed_keys, vector_store)
         db.commit()
         logger.info("Importação IA concluída. Total processado=%d", processed)
 
