@@ -6,13 +6,15 @@ Opcional: .env com WORKER_LOG_FORMAT=text (padrao) ou json.
 
 Encerra com Ctrl+C (SIGINT) ou SIGTERM.
 
-Cada corpo de mensagem deve conter {"chave_jira": "PROJ-123"}.
+Cada corpo de mensagem aceita:
+  - JSON minimo: {"chave_jira": "PROJ-123"} (fluxo completo)
+  - JSON parcial com flags (ex.: saudacao_publica, transicionar, comentario_interno)
+  - Somente a chave: "PROJ-123" ou PROJ-123 (texto puro)
 Reutiliza JiraFlowService.process_issue (mesma logica de process-flow).
 
 Uso: na pasta `project`, com venv: `python -m worker.sqs_consumer`
 """
 
-import json
 import logging
 import signal
 import sys
@@ -27,8 +29,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils.config import Settings, get_settings
-from utils.sqs_diagnostics import sqs_url_diagnostic
 from utils.logging import compact_error_message, configure_logging, set_correlation_id
+from utils.sqs_diagnostics import sqs_url_diagnostic
+from utils.sqs_message import (
+    describe_message_profile,
+    format_parsed_message_preview,
+    parse_message_body,
+    resolve_flow_flags,
+)
 from models.database import SessionLocal, init_db
 from embeddings.service import EmbeddingService
 from ingestion.service import IngestionService
@@ -113,24 +121,16 @@ def _build_flow_service() -> JiraFlowService:
 
 
 def _process_message(flow_service: JiraFlowService, body: dict) -> dict:
-    chave_jira = body.get("chave_jira", "").strip()
+    chave_jira = (body.get("chave_jira") or "").strip()
     if not chave_jira:
         raise ValueError("Mensagem sem campo 'chave_jira'")
 
     set_correlation_id(chave_jira)
+    flags = resolve_flow_flags(body)
 
     db = SessionLocal()
     try:
-        result = flow_service.process_issue(
-            db,
-            chave_jira,
-            saudacao_publica=body.get("saudacao_publica", True),
-            transicionar=body.get("transicionar", True),
-            atribuir=body.get("atribuir", True),
-            comentario_interno=body.get("comentario_interno", True),
-            responsavel_account_id=body.get("responsavel_account_id", ""),
-            nome_transicao=body.get("nome_transicao", ""),
-        )
+        result = flow_service.process_issue(db, chave_jira, **flags)
         db.commit()
         return result
     except Exception:
@@ -139,6 +139,17 @@ def _process_message(flow_service: JiraFlowService, body: dict) -> dict:
     finally:
         db.close()
         set_correlation_id(None)
+
+
+def _format_completion_log(result: dict) -> str:
+    trans_dest = result.get("transicao_destino") or "-"
+    return (
+        f"saudacao={result.get('saudacao_motivo')} | "
+        f"comentario={result.get('comentario_motivo')} | "
+        f"trans={result.get('transicao_motivo')} (destino={trans_dest}) | "
+        f"atrib={result.get('atribuicao_motivo')} | "
+        f"status={result.get('status_final', '')}"
+    )
 
 
 def _short_sqs_id(message_id: str) -> str:
@@ -210,33 +221,42 @@ def run() -> None:
         for message in messages:
             receipt_handle = message["ReceiptHandle"]
             message_id = message.get("MessageId", "?")
+            raw_body = message.get("Body", "")
 
             try:
-                body = json.loads(message["Body"])
-            except (json.JSONDecodeError, KeyError):
-                slog.error("JSON invalido, descartando | id=%s", _short_sqs_id(message_id))
+                body, body_format = parse_message_body(raw_body)
+            except ValueError:
+                slog.error(
+                    "Corpo invalido, descartando | id=%s | corpo_bruto=%s",
+                    _short_sqs_id(message_id),
+                    raw_body.strip() or "(vazio)",
+                )
                 sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
                 continue
 
-            chave = body.get("chave_jira", "?")
+            chave = (body.get("chave_jira") or "?").strip()
+            profile = describe_message_profile(body, body_format=body_format)
             slog.info(
-                ">> %s | id=%s",
+                ">> %s | %s | id=%s",
                 chave,
+                profile,
                 _short_sqs_id(message_id),
             )
+            for preview_line in format_parsed_message_preview(
+                raw_body,
+                body,
+                body_format=body_format,
+            ):
+                slog.info("%s", preview_line)
 
             try:
                 result = _process_message(flow_service, body)
                 sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
                 slog.info(
-                    "<< %s | fallback=%s | comentario=%s | saudacao=%s | trans=%s | atrib=%s | status=%s | id=%s",
+                    "<< %s | %s | fallback=%s | id=%s",
                     chave,
+                    _format_completion_log(result),
                     result.get("fallback"),
-                    result.get("comentario_interno"),
-                    result.get("saudacao_publica"),
-                    result.get("transicao_realizada"),
-                    result.get("atribuicao_realizada"),
-                    result.get("status_final", ""),
                     _short_sqs_id(message_id),
                 )
                 consecutive_errors = 0

@@ -273,6 +273,11 @@ class JiraClient:
         current_issue = self.get_issue(issue_key)
         current_status = ((current_issue or {}).get("fields", {}).get("status", {}) or {}).get("name", "")
         if _normalize_label(current_status) == _normalize_label(transition_name):
+            logger.info(
+                "jira_transition_skipped | status_atual=%s | destino=%s | motivo=ja_no_status",
+                current_status,
+                transition_name,
+            )
             return False
 
         url = f"{self.base_url}/rest/api/3/issue/{issue_key}/transitions"

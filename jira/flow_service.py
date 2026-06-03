@@ -42,7 +42,7 @@ class JiraFlowService:
         atribuir: bool = True,
         comentario_interno: bool = True,
         responsavel_account_id: str = "",
-        nome_transicao: str = "",
+        nome_transicao: str | None = "",
     ) -> dict[str, Any]:
         issue_key = issue_key.strip()
         raw_issue = self.jira_client.get_issue(issue_key)
@@ -55,28 +55,45 @@ class JiraFlowService:
         request_id = self.jira_client.extract_request_id(raw_issue)
         reporter_name = self.jira_client.extract_reporter_first_name(raw_issue)
         public_comment_done = False
+        public_comment_motive = "desativada"
 
         if saudacao_publica and request_id:
             public_message = self._build_public_greeting(issue_key, reporter_name)
             self.jira_client.post_public_comment(request_id, public_message)
             public_comment_done = True
+            public_comment_motive = "realizada"
         elif saudacao_publica:
+            public_comment_motive = "request_id_ausente"
             logger.warning(
                 "jira_public_comment_skipped",
                 extra={"chave_jira": issue_key, "reason": "request_id_not_found"},
             )
 
-        transition_name = nome_transicao.strip() or settings.jira_triage_transition_name.strip() or "Analise JDMS"
+        transition_name = (
+            (nome_transicao or "").strip()
+            or (settings.jira_triage_transition_name or "").strip()
+            or "Analise JDMS"
+        )
         transition_done = False
+        transition_motive = "desativada"
         if transicionar and transition_name:
             transition_done = self.jira_client.transition_issue(issue_key, transition_name=transition_name)
+            transition_motive = "realizada" if transition_done else "ja_no_status"
+        elif transicionar:
+            transition_motive = "sem_nome_transicao"
 
-        effective_assignee_id = responsavel_account_id.strip() or settings.jira_default_assignee_id.strip()
+        effective_assignee_id = (
+            (responsavel_account_id or "").strip()
+            or (settings.jira_default_assignee_id or "").strip()
+        )
         assignment_done = False
+        assignment_motive = "desativada"
         if atribuir and effective_assignee_id:
             self.jira_client.assign_issue(issue_key, effective_assignee_id)
             assignment_done = True
+            assignment_motive = "realizada"
         elif atribuir:
+            assignment_motive = "responsavel_nao_configurado"
             logger.warning(
                 "jira_assignment_skipped",
                 extra={"chave_jira": issue_key, "reason": "assignee_not_configured"},
@@ -85,6 +102,7 @@ class JiraFlowService:
         referenced_tickets: list[str] = []
         fallback_used = False
         internal_comment_done = False
+        internal_comment_motive = "desativada"
         if comentario_interno:
             _comment, referenced_tickets, fallback_used = self.llm_service.generate_triage_comment(
                 db,
@@ -96,6 +114,7 @@ class JiraFlowService:
                 post=True,
             )
             internal_comment_done = True
+            internal_comment_motive = "realizada"
 
         refreshed_issue = self.jira_client.get_issue(issue_key) or raw_issue
         fields = refreshed_issue.get("fields", {})
@@ -105,9 +124,14 @@ class JiraFlowService:
         return {
             "chave_jira": issue_key,
             "saudacao_publica": public_comment_done,
+            "saudacao_motivo": public_comment_motive,
             "transicao_realizada": transition_done,
+            "transicao_motivo": transition_motive,
+            "transicao_destino": transition_name if transicionar else "",
             "atribuicao_realizada": assignment_done,
+            "atribuicao_motivo": assignment_motive,
             "comentario_interno": internal_comment_done,
+            "comentario_motivo": internal_comment_motive,
             "status_final": status.get("name", ""),
             "responsavel_final": assignee.get("displayName", ""),
             "tickets_relacionados": referenced_tickets,

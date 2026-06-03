@@ -8,6 +8,7 @@ from qdrant_client.models import (
     Filter,
     MatchAny,
     MatchValue,
+    PayloadSchemaType,
     PointStruct,
     VectorParams,
 )
@@ -27,6 +28,9 @@ class QdrantVectorStore:
             api_key=self._settings.qdrant_api_key_value(),
         )
         self._ensure_collection()
+        self._ensure_payload_indexes()
+
+    _FILTER_PAYLOAD_INDEXES: tuple[str, ...] = ("status", "chave_jira")
 
     @property
     def collection_name(self) -> str:
@@ -47,6 +51,27 @@ class QdrantVectorStore:
             "qdrant_collection_created",
             extra={"collection": self._collection, "dimension": self._settings.embedding_dimension},
         )
+
+    def _ensure_payload_indexes(self) -> None:
+        for field_name in self._FILTER_PAYLOAD_INDEXES:
+            try:
+                self._client.create_payload_index(
+                    collection_name=self._collection,
+                    field_name=field_name,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+                logger.info(
+                    "qdrant_payload_index_created",
+                    extra={"collection": self._collection, "field": field_name},
+                )
+            except Exception as exc:
+                message = str(exc).lower()
+                if "already exists" in message or "already exist" in message:
+                    continue
+                logger.warning(
+                    "qdrant_payload_index_skipped",
+                    extra={"collection": self._collection, "field": field_name, "reason": str(exc)[:200]},
+                )
 
     def upsert(
         self,
