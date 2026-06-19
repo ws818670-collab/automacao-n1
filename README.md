@@ -173,13 +173,22 @@ Se voce ja tem um script no estilo `D:\...\start-todos.bat` com varias linhas `s
 
 ## Fila SQS
 
-Corpo minimo da mensagem:
+Corpo minimo da mensagem (fluxo completo de triagem):
 
 ```json
 {"chave_jira": "PROJ-123"}
 ```
 
-Campos opcionais alinham-se aos argumentos de `JiraFlowService.process_issue` (ex.: `saudacao_publica`, `transicionar`, `comentario_interno`).
+Retorno Avalara por e-mail (comentario interno + transicao para `Analise JDMS`, sem LLM):
+
+```json
+{
+  "chave_jira": "JDMSN1-2222",
+  "bodyDoEmail": "Testando automação"
+}
+```
+
+Campos opcionais do fluxo completo alinham-se aos argumentos de `JiraFlowService.process_issue` (ex.: `saudacao_publica`, `transicionar`, `comentario_interno`).
 
 ## Regras implementadas no MVP
 - Consolidacao textual: resumo + descricao + comentarios

@@ -14,6 +14,9 @@ from utils.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+_EMAIL_BODY_COMMENT_PREFIX = "Comentário Avalara"
+_EMAIL_BODY_MAX_CHARS = 9000
+
 
 class JiraFlowService:
     def __init__(
@@ -31,6 +34,41 @@ class JiraFlowService:
         self.retrieval_service = retrieval_service
         self.llm_service = llm_service
         self.allowed_statuses = allowed_statuses
+
+    def process_email_body_reply(self, issue_key: str, body_do_email: str) -> dict[str, Any]:
+        """Comentario interno com retorno Avalara e transicao para Analise JDMS (sem LLM/ingestao)."""
+        issue_key = issue_key.strip()
+        raw_issue = self.jira_client.get_issue(issue_key)
+        if raw_issue is None:
+            raise JiraIssueNotFoundError(f"Ticket {issue_key} nao encontrado no Jira")
+
+        comment_body = self._build_email_body_comment(body_do_email)
+        self.jira_client.post_comment_direct(issue_key, comment_body)
+
+        transition_name = (settings.jira_triage_transition_name or "").strip() or "Analise JDMS"
+        transition_done = self.jira_client.transition_issue(issue_key, transition_name=transition_name)
+        transition_motive = "realizada" if transition_done else "ja_no_status"
+
+        refreshed_issue = self.jira_client.get_issue(issue_key) or raw_issue
+        fields = refreshed_issue.get("fields", {})
+        status = fields.get("status") or {}
+
+        return {
+            "chave_jira": issue_key,
+            "saudacao_publica": False,
+            "saudacao_motivo": "desativada",
+            "transicao_realizada": transition_done,
+            "transicao_motivo": transition_motive,
+            "transicao_destino": transition_name,
+            "atribuicao_realizada": False,
+            "atribuicao_motivo": "desativada",
+            "comentario_interno": True,
+            "comentario_motivo": "realizada",
+            "status_final": status.get("name", ""),
+            "responsavel_final": (fields.get("assignee") or {}).get("displayName", ""),
+            "tickets_relacionados": [],
+            "fallback": False,
+        }
 
     def process_issue(
         self,
@@ -160,3 +198,10 @@ class JiraFlowService:
         ]
         template = templates[sum(ord(ch) for ch in issue_key) % len(templates)]
         return template.format(nome=first_name)
+
+    @staticmethod
+    def _build_email_body_comment(body_do_email: str) -> str:
+        body = (body_do_email or "").strip()
+        if len(body) > _EMAIL_BODY_MAX_CHARS:
+            body = body[:_EMAIL_BODY_MAX_CHARS].rstrip() + "\n\n[texto truncado]"
+        return f"{_EMAIL_BODY_COMMENT_PREFIX}\n\n{body or '[sem conteudo textual]'}"

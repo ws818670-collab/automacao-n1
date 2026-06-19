@@ -162,13 +162,24 @@ Arquitetura em camadas, com separação por domínio técnico:
 
 ## 6. Contrato da fila (SQS)
 
-Corpo JSON mínimo:
+Corpo JSON mínimo (fluxo completo de triagem):
 
 ```json
 {"chave_jira": "PROJ-123"}
 ```
 
-Campos opcionais (alinhados ao `process_issue`): por exemplo `saudacao_publica`, `transicionar`, `atribuir`, `comentario_interno`, `responsavel_account_id`, `nome_transicao`.
+Perfil de retorno Avalara (comentário interno + transição para `Analise JDMS`, sem LLM/ingestão):
+
+```json
+{
+  "chave_jira": "JDMSN1-2222",
+  "bodyDoEmail": "Testando automação"
+}
+```
+
+Quando `bodyDoEmail` está presente e não vazio, o worker publica comentário interno prefixado com `Comentário Avalara` e transiciona o chamado; saudação, atribuição e triagem LLM não são executadas.
+
+Campos opcionais do fluxo completo (alinhados ao `process_issue`): por exemplo `saudacao_publica`, `transicionar`, `atribuir`, `comentario_interno`, `responsavel_account_id`, `nome_transicao`.
 
 Permissões AWS típicas do consumidor: `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` (conforme política da conta).
 

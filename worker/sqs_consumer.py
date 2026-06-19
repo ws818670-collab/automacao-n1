@@ -8,6 +8,8 @@ Encerra com Ctrl+C (SIGINT) ou SIGTERM.
 
 Cada corpo de mensagem aceita:
   - JSON minimo: {"chave_jira": "PROJ-123"} (fluxo completo)
+  - JSON com retorno Avalara: {"chave_jira": "PROJ-123", "bodyDoEmail": "..."}
+    (comentario interno + transicao Analise JDMS, sem LLM)
   - JSON parcial com flags (ex.: saudacao_publica, transicionar, comentario_interno)
   - Somente a chave: "PROJ-123" ou PROJ-123 (texto puro)
 Reutiliza JiraFlowService.process_issue (mesma logica de process-flow).
@@ -35,6 +37,7 @@ from utils.sqs_message import (
     describe_message_profile,
     format_parsed_message_preview,
     parse_message_body,
+    resolve_email_body_flow,
     resolve_flow_flags,
 )
 from models.database import SessionLocal, init_db
@@ -126,6 +129,10 @@ def _process_message(flow_service: JiraFlowService, body: dict) -> dict:
         raise ValueError("Mensagem sem campo 'chave_jira'")
 
     set_correlation_id(chave_jira)
+    body_do_email = resolve_email_body_flow(body)
+    if body_do_email is not None:
+        return flow_service.process_email_body_reply(chave_jira, body_do_email)
+
     flags = resolve_flow_flags(body)
 
     db = SessionLocal()

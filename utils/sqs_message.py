@@ -22,6 +22,8 @@ FLOW_BOOL_LABELS: dict[str, str] = {
     "comentario_interno": "comentario",
 }
 
+EMAIL_BODY_FIELD_NAMES = ("bodyDoEmail", "body_do_email")
+
 
 def _looks_like_jira_key(value: str) -> bool:
     return bool(_JIRA_KEY_RE.match(value.strip()))
@@ -59,6 +61,28 @@ def parse_message_body(raw: str) -> tuple[dict[str, Any], str]:
     raise ValueError(f"Tipo JSON nao suportado: {type(parsed).__name__}")
 
 
+def resolve_email_body_flow(body: dict[str, Any]) -> str | None:
+    """
+    Retorna o texto do corpo de e-mail quando a mensagem ativa o fluxo leve.
+
+    None: campo ausente (fluxo completo de triagem).
+    Raises ValueError: campo presente mas vazio apos trim.
+    """
+    raw_value: Any = None
+    for field_name in EMAIL_BODY_FIELD_NAMES:
+        if field_name in body:
+            raw_value = body[field_name]
+            break
+
+    if raw_value is None:
+        return None
+
+    text = str(raw_value).strip()
+    if not text:
+        raise ValueError("Campo 'bodyDoEmail' vazio")
+    return text
+
+
 def resolve_flow_flags(body: dict[str, Any]) -> dict[str, Any]:
     """Aplica defaults do fluxo e normaliza campos opcionais."""
     return {
@@ -73,18 +97,21 @@ def resolve_flow_flags(body: dict[str, Any]) -> dict[str, Any]:
 
 def describe_message_profile(body: dict[str, Any], *, body_format: str) -> str:
     """Linha legivel do perfil da mensagem para logs do worker."""
-    explicit_bool = [key for key in FLOW_BOOL_DEFAULTS if key in body]
-    explicit_str = [
-        key
-        for key in ("responsavel_account_id", "nome_transicao")
-        if key in body and str(body.get(key) or "").strip()
-    ]
     format_label = {
         "json_completo": "json",
         "json_chave": "json_só_chave",
         "texto_chave": "texto_só_chave",
     }.get(body_format, body_format)
 
+    if any(field_name in body for field_name in EMAIL_BODY_FIELD_NAMES):
+        return f"formato={format_label} | perfil=email_body | fluxo=comentario_avalara+trans"
+
+    explicit_bool = [key for key in FLOW_BOOL_DEFAULTS if key in body]
+    explicit_str = [
+        key
+        for key in ("responsavel_account_id", "nome_transicao")
+        if key in body and str(body.get(key) or "").strip()
+    ]
     if not explicit_bool and not explicit_str:
         return (
             f"formato={format_label} | perfil=completo | "

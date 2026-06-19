@@ -4,6 +4,7 @@ from utils.sqs_message import (
     describe_message_profile,
     format_parsed_message_preview,
     parse_message_body,
+    resolve_email_body_flow,
     resolve_flow_flags,
 )
 
@@ -85,3 +86,32 @@ def test_format_parsed_message_preview() -> None:
 def test_parse_invalid_body_raises() -> None:
     with pytest.raises(ValueError):
         parse_message_body("nao-e-json-nem-chave")
+
+
+def test_resolve_email_body_flow_absent() -> None:
+    assert resolve_email_body_flow({"chave_jira": "JDMSN1-1"}) is None
+
+
+def test_resolve_email_body_flow_camel_case() -> None:
+    assert resolve_email_body_flow({"bodyDoEmail": "  Testando automação  "}) == "Testando automação"
+
+
+def test_resolve_email_body_flow_snake_case() -> None:
+    assert resolve_email_body_flow({"body_do_email": "Corpo do e-mail"}) == "Corpo do e-mail"
+
+
+def test_resolve_email_body_flow_prefers_body_do_email_when_both_present() -> None:
+    body = {"bodyDoEmail": "camel", "body_do_email": "snake"}
+    assert resolve_email_body_flow(body) == "camel"
+
+
+def test_resolve_email_body_flow_empty_raises() -> None:
+    with pytest.raises(ValueError, match="bodyDoEmail"):
+        resolve_email_body_flow({"bodyDoEmail": "   "})
+
+
+def test_describe_perfil_email_body() -> None:
+    body = {"chave_jira": "JDMSN1-1", "bodyDoEmail": "Teste"}
+    summary = describe_message_profile(body, body_format="json_completo")
+    assert "perfil=email_body" in summary
+    assert "fluxo=comentario_avalara+trans" in summary
