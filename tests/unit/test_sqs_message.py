@@ -3,6 +3,7 @@ import pytest
 from utils.sqs_message import (
     describe_message_profile,
     format_parsed_message_preview,
+    is_default_triage_flow,
     parse_message_body,
     resolve_email_body_flow,
     resolve_flow_flags,
@@ -33,6 +34,19 @@ def test_describe_perfil_completo() -> None:
     summary = describe_message_profile(body, body_format="json_completo")
     assert "perfil=completo" in summary
     assert "fluxo=padrao" in summary
+    assert "guard=duplicata_automacao" in summary
+
+
+def test_is_default_triage_flow_only_key() -> None:
+    assert is_default_triage_flow({"chave_jira": "JDMSN1-2844"}) is True
+
+
+def test_is_default_triage_flow_with_flags() -> None:
+    assert is_default_triage_flow({"chave_jira": "X", "transicionar": False}) is False
+
+
+def test_is_default_triage_flow_with_body_do_email() -> None:
+    assert is_default_triage_flow({"chave_jira": "X", "bodyDoEmail": "corpo"}) is False
 
 
 def test_describe_perfil_parcial() -> None:

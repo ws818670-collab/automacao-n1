@@ -179,6 +179,8 @@ Corpo minimo da mensagem (fluxo completo de triagem):
 {"chave_jira": "PROJ-123"}
 ```
 
+Esse fluxo padrao so executa se o chamado **ainda nao tiver comentario da conta de automacao** (`JIRA_EMAIL`). Comentarios do cliente nao bloqueiam. Em reprocessamento da fila, o worker retorna `ja_processado` sem duplicar saudacao nem comentario interno.
+
 Retorno Avalara por e-mail (comentario interno + transicao para `Analise JDMS`, sem LLM):
 
 ```json
@@ -187,6 +189,8 @@ Retorno Avalara por e-mail (comentario interno + transicao para `Analise JDMS`, 
   "bodyDoEmail": "Testando automação"
 }
 ```
+
+So executa se o chamado estiver no status **Aguardando retorno - Avalara**; caso contrario, a mensagem e processada sem alterar o Jira.
 
 Campos opcionais do fluxo completo alinham-se aos argumentos de `JiraFlowService.process_issue` (ex.: `saudacao_publica`, `transicionar`, `comentario_interno`).
 

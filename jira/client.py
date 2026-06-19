@@ -19,6 +19,7 @@ class JiraClient:
         self.base_url = settings.jira_base_url.rstrip("/")
         self.auth = (settings.jira_email, settings.jira_api_token_value())
         self.headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        self._automation_account_id: str | None = None
 
     def is_configured(self) -> bool:
         return bool(self.base_url and settings.jira_email and settings.jira_api_token_value())
@@ -254,6 +255,75 @@ class JiraClient:
         display_name = reporter.get("displayName", "") if isinstance(reporter, dict) else ""
         first_name = display_name.strip().split()[0] if display_name else "Equipe"
         return first_name or "Equipe"
+
+    def get_automation_account_id(self) -> str:
+        if self._automation_account_id:
+            return self._automation_account_id
+
+        if not self.is_configured():
+            raise JiraClientError("Jira client nao configurado")
+
+        url = f"{self.base_url}/rest/api/3/myself"
+        with httpx.Client(timeout=settings.external_timeout_seconds) as client:
+            response = self._request_with_retry(client, "GET", url)
+            account_id = str(response.json().get("accountId", "")).strip()
+            if not account_id:
+                raise JiraClientError("Account ID da automacao nao encontrado em /myself")
+            self._automation_account_id = account_id
+            return account_id
+
+    def _comment_author_matches_automation(self, comment: dict[str, Any], automation_account_id: str) -> bool:
+        author = comment.get("author") or {}
+        if not isinstance(author, dict):
+            return False
+
+        author_account_id = str(author.get("accountId", "")).strip()
+        if author_account_id and author_account_id == automation_account_id:
+            return True
+
+        author_email = str(author.get("emailAddress", "")).strip().lower()
+        automation_email = settings.jira_email.strip().lower()
+        return bool(author_email and automation_email and author_email == automation_email)
+
+    def _list_request_comments(self, request_id: str) -> list[dict[str, Any]]:
+        if not request_id.strip():
+            return []
+
+        url = f"{self.base_url}/rest/servicedeskapi/request/{request_id}/comment"
+        with httpx.Client(timeout=settings.external_timeout_seconds) as client:
+            try:
+                response = self._request_with_retry(client, "GET", url)
+            except JiraClientError:
+                logger.warning("Falha ao listar comentarios do request %s", request_id)
+                return []
+
+        values = response.json().get("values", [])
+        return values if isinstance(values, list) else []
+
+    def issue_has_automation_comments(self, issue: dict[str, Any]) -> bool:
+        if not self.is_configured():
+            return False
+
+        automation_account_id = self.get_automation_account_id()
+        issue_comments = (issue.get("fields", {}).get("comment", {}) or {}).get("comments", [])
+        if isinstance(issue_comments, list):
+            for comment in issue_comments:
+                if isinstance(comment, dict) and self._comment_author_matches_automation(
+                    comment,
+                    automation_account_id,
+                ):
+                    return True
+
+        request_id = self.extract_request_id(issue)
+        if request_id:
+            for comment in self._list_request_comments(request_id):
+                if isinstance(comment, dict) and self._comment_author_matches_automation(
+                    comment,
+                    automation_account_id,
+                ):
+                    return True
+
+        return False
 
     def post_public_comment(self, request_id: str, body: str) -> None:
         if not self.is_configured():

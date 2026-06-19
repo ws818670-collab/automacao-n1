@@ -71,12 +71,65 @@ def test_process_issue_uses_custom_transition_name(flow_service: JiraFlowService
     )
 
 
+def test_process_issue_skips_when_automation_already_commented(
+    flow_service: JiraFlowService,
+    sqlite_session,
+) -> None:
+    raw_issue = {
+        "key": "JDMSN1-2844",
+        "fields": {
+            "status": {"name": "Triagem"},
+            "comment": {"comments": [{"author": {"accountId": "bot-123"}}]},
+        },
+    }
+    flow_service.jira_client.get_issue.return_value = raw_issue
+    flow_service.jira_client.issue_has_automation_comments.return_value = True
+
+    result = flow_service.process_issue(
+        sqlite_session,
+        "JDMSN1-2844",
+        saudacao_publica=False,
+        transicionar=False,
+        atribuir=False,
+        comentario_interno=False,
+        skip_if_automation_commented=True,
+    )
+
+    flow_service.ingestion_service.process_ticket_data.assert_not_called()
+    flow_service.jira_client.transition_issue.assert_not_called()
+    flow_service.llm_service.generate_triage_comment.assert_not_called()
+    assert result["comentario_motivo"] == "ja_processado"
+    assert result["transicao_motivo"] == "ja_processado"
+    assert result["saudacao_motivo"] == "ja_processado"
+
+
+def test_process_issue_proceeds_when_only_client_commented(
+    flow_service: JiraFlowService,
+    sqlite_session,
+) -> None:
+    _setup_issue_mocks(flow_service)
+    flow_service.jira_client.issue_has_automation_comments.return_value = False
+
+    flow_service.process_issue(
+        sqlite_session,
+        "JDMSN1-2797",
+        saudacao_publica=False,
+        transicionar=True,
+        atribuir=False,
+        comentario_interno=False,
+        skip_if_automation_commented=True,
+    )
+
+    flow_service.ingestion_service.process_ticket_data.assert_called_once()
+    flow_service.jira_client.transition_issue.assert_called_once()
+
+
 def test_process_email_body_reply_posts_comment_and_transitions(flow_service: JiraFlowService) -> None:
     raw_issue = {
         "key": "JDMSN1-2222",
         "fields": {
             "assignee": {"displayName": "Agente"},
-            "status": {"name": "Analise JDMS"},
+            "status": {"name": "Aguardando retorno - Avalara"},
         },
     }
     flow_service.jira_client.get_issue.return_value = raw_issue
@@ -99,15 +152,31 @@ def test_process_email_body_reply_posts_comment_and_transitions(flow_service: Ji
     assert result["transicao_destino"] == "Analise JDMS"
 
 
-def test_process_email_body_reply_already_in_status(flow_service: JiraFlowService) -> None:
+def test_process_email_body_reply_skips_when_status_not_avalara(flow_service: JiraFlowService) -> None:
     flow_service.jira_client.get_issue.return_value = {
         "key": "JDMSN1-2222",
         "fields": {"status": {"name": "Analise JDMS"}},
+    }
+
+    result = flow_service.process_email_body_reply("JDMSN1-2222", "Corpo")
+
+    flow_service.jira_client.post_comment_direct.assert_not_called()
+    flow_service.jira_client.transition_issue.assert_not_called()
+    assert result["comentario_motivo"] == "status_incompativel"
+    assert result["transicao_motivo"] == "status_incompativel"
+    assert result["status_final"] == "Analise JDMS"
+
+
+def test_process_email_body_reply_already_in_target_after_transition(flow_service: JiraFlowService) -> None:
+    flow_service.jira_client.get_issue.return_value = {
+        "key": "JDMSN1-2222",
+        "fields": {"status": {"name": "Aguardando retorno - Avalara"}},
     }
     flow_service.jira_client.transition_issue.return_value = False
 
     result = flow_service.process_email_body_reply("JDMSN1-2222", "Corpo")
 
+    flow_service.jira_client.post_comment_direct.assert_called_once()
     assert result["transicao_motivo"] == "ja_no_status"
     assert result["transicao_realizada"] is False
 

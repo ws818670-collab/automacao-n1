@@ -36,6 +36,7 @@ from utils.sqs_diagnostics import sqs_url_diagnostic
 from utils.sqs_message import (
     describe_message_profile,
     format_parsed_message_preview,
+    is_default_triage_flow,
     parse_message_body,
     resolve_email_body_flow,
     resolve_flow_flags,
@@ -134,10 +135,16 @@ def _process_message(flow_service: JiraFlowService, body: dict) -> dict:
         return flow_service.process_email_body_reply(chave_jira, body_do_email)
 
     flags = resolve_flow_flags(body)
+    skip_dup = is_default_triage_flow(body)
 
     db = SessionLocal()
     try:
-        result = flow_service.process_issue(db, chave_jira, **flags)
+        result = flow_service.process_issue(
+            db,
+            chave_jira,
+            skip_if_automation_commented=skip_dup,
+            **flags,
+        )
         db.commit()
         return result
     except Exception:

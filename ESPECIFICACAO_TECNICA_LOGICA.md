@@ -168,6 +168,8 @@ Corpo JSON mínimo (fluxo completo de triagem):
 {"chave_jira": "PROJ-123"}
 ```
 
+No fluxo padrão (somente `chave_jira`, sem flags explícitas), o worker verifica se já existe comentário da conta de automação (`JIRA_EMAIL`) no chamado. Se existir, conclui com `ja_processado` sem saudação, transição, atribuição nem comentário interno LLM. Comentários do cliente não bloqueiam a execução.
+
 Perfil de retorno Avalara (comentário interno + transição para `Analise JDMS`, sem LLM/ingestão):
 
 ```json
@@ -177,7 +179,7 @@ Perfil de retorno Avalara (comentário interno + transição para `Analise JDMS`
 }
 ```
 
-Quando `bodyDoEmail` está presente e não vazio, o worker publica comentário interno prefixado com `Comentário Avalara` e transiciona o chamado; saudação, atribuição e triagem LLM não são executadas.
+Quando `bodyDoEmail` está presente e não vazio, o worker verifica se o chamado está em **Aguardando retorno - Avalara**. Se estiver, publica comentário interno prefixado com `Comentário Avalara`, transiciona para `Analise JDMS` e não executa saudação, atribuição nem triagem LLM. Se o status for outro, a mensagem é concluída sem alterar o chamado.
 
 Campos opcionais do fluxo completo (alinhados ao `process_issue`): por exemplo `saudacao_publica`, `transicionar`, `atribuir`, `comentario_interno`, `responsavel_account_id`, `nome_transicao`.
 

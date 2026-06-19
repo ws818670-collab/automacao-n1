@@ -83,6 +83,14 @@ def resolve_email_body_flow(body: dict[str, Any]) -> str | None:
     return text
 
 
+def is_default_triage_flow(body: dict[str, Any]) -> bool:
+    """True quando a mensagem e o fluxo padrao (somente chave, sem flags nem bodyDoEmail)."""
+    if any(field_name in body for field_name in EMAIL_BODY_FIELD_NAMES):
+        return False
+    override_keys = set(FLOW_BOOL_DEFAULTS) | {"responsavel_account_id", "nome_transicao"}
+    return not any(key in body for key in override_keys)
+
+
 def resolve_flow_flags(body: dict[str, Any]) -> dict[str, Any]:
     """Aplica defaults do fluxo e normaliza campos opcionais."""
     return {
@@ -115,7 +123,7 @@ def describe_message_profile(body: dict[str, Any], *, body_format: str) -> str:
     if not explicit_bool and not explicit_str:
         return (
             f"formato={format_label} | perfil=completo | "
-            "fluxo=padrao (saudacao+trans+atrib+comentario)"
+            "fluxo=padrao (saudacao+trans+atrib+comentario) | guard=duplicata_automacao"
         )
 
     parts = [f"formato={format_label}", "perfil=parcial"]

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from embeddings.service import EmbeddingService
 from exceptions import JiraIssueNotFoundError
 from ingestion.service import IngestionService
-from jira.client import JiraClient, normalize_issue
+from jira.client import JiraClient, _normalize_label, normalize_issue
 from llm.service import LLMService
 from retrieval.service import RetrievalService
 from utils.config import get_settings
@@ -16,6 +16,7 @@ settings = get_settings()
 
 _EMAIL_BODY_COMMENT_PREFIX = "Comentário Avalara"
 _EMAIL_BODY_MAX_CHARS = 9000
+_EMAIL_BODY_REQUIRED_STATUS = "Aguardando retorno - Avalara"
 
 
 class JiraFlowService:
@@ -41,6 +42,19 @@ class JiraFlowService:
         raw_issue = self.jira_client.get_issue(issue_key)
         if raw_issue is None:
             raise JiraIssueNotFoundError(f"Ticket {issue_key} nao encontrado no Jira")
+
+        fields = raw_issue.get("fields", {})
+        status = fields.get("status") or {}
+        current_status = status.get("name", "")
+
+        if _normalize_label(current_status) != _normalize_label(_EMAIL_BODY_REQUIRED_STATUS):
+            logger.info(
+                "email_body_flow_skipped | chave=%s | status_atual=%s | status_esperado=%s",
+                issue_key,
+                current_status,
+                _EMAIL_BODY_REQUIRED_STATUS,
+            )
+            return self._build_email_body_skipped_result(issue_key, current_status, fields)
 
         comment_body = self._build_email_body_comment(body_do_email)
         self.jira_client.post_comment_direct(issue_key, comment_body)
@@ -81,11 +95,23 @@ class JiraFlowService:
         comentario_interno: bool = True,
         responsavel_account_id: str = "",
         nome_transicao: str | None = "",
+        skip_if_automation_commented: bool = False,
     ) -> dict[str, Any]:
         issue_key = issue_key.strip()
         raw_issue = self.jira_client.get_issue(issue_key)
         if raw_issue is None:
             raise JiraIssueNotFoundError(f"Ticket {issue_key} nao encontrado no Jira")
+
+        if skip_if_automation_commented and self.jira_client.issue_has_automation_comments(raw_issue):
+            fields = raw_issue.get("fields", {})
+            status = fields.get("status") or {}
+            current_status = status.get("name", "")
+            logger.info(
+                "triage_flow_skipped | chave=%s | motivo=ja_processado | status_atual=%s",
+                issue_key,
+                current_status,
+            )
+            return self._build_triage_skipped_result(issue_key, current_status, fields)
 
         normalized = normalize_issue(raw_issue)
         self.ingestion_service.process_ticket_data(db, normalized)
@@ -198,6 +224,52 @@ class JiraFlowService:
         ]
         template = templates[sum(ord(ch) for ch in issue_key) % len(templates)]
         return template.format(nome=first_name)
+
+    @staticmethod
+    def _build_triage_skipped_result(
+        issue_key: str,
+        current_status: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "chave_jira": issue_key,
+            "saudacao_publica": False,
+            "saudacao_motivo": "ja_processado",
+            "transicao_realizada": False,
+            "transicao_motivo": "ja_processado",
+            "transicao_destino": "",
+            "atribuicao_realizada": False,
+            "atribuicao_motivo": "ja_processado",
+            "comentario_interno": False,
+            "comentario_motivo": "ja_processado",
+            "status_final": current_status,
+            "responsavel_final": (fields.get("assignee") or {}).get("displayName", ""),
+            "tickets_relacionados": [],
+            "fallback": False,
+        }
+
+    @staticmethod
+    def _build_email_body_skipped_result(
+        issue_key: str,
+        current_status: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "chave_jira": issue_key,
+            "saudacao_publica": False,
+            "saudacao_motivo": "desativada",
+            "transicao_realizada": False,
+            "transicao_motivo": "status_incompativel",
+            "transicao_destino": "",
+            "atribuicao_realizada": False,
+            "atribuicao_motivo": "desativada",
+            "comentario_interno": False,
+            "comentario_motivo": "status_incompativel",
+            "status_final": current_status,
+            "responsavel_final": (fields.get("assignee") or {}).get("displayName", ""),
+            "tickets_relacionados": [],
+            "fallback": False,
+        }
 
     @staticmethod
     def _build_email_body_comment(body_do_email: str) -> str:
